@@ -222,6 +222,117 @@ const l2UiImportBans = [
     },
 ];
 
+/**
+ * Globals banned in the in-plugin agent core (`packages/agent-local`). Mirrors
+ * `l1CoreGlobals`: this package has the same isolation goal as agent-core — it
+ * must typecheck and run with no Zotero and no React/Jotai app graph present —
+ * so it gets the same, stricter list rather than agent-ui's DOM-aware one.
+ * None of these names collide with the package's own globals.d.ts surface
+ * (fetch, Response, TextDecoder, URL, URLSearchParams, AbortController,
+ * crypto, console, setTimeout), so nothing here needs narrowing for it.
+ */
+const l3LocalGlobals = [
+    ...restrictedGlobals,
+    {
+        name: "Zotero",
+        message:
+            "The local agent must stay client-agnostic — Zotero specifics belong behind an adapter module, not here.",
+    },
+    {
+        name: "process",
+        message:
+            "The local agent must not read build-time config directly — declare the host global it needs in globals.d.ts and read it through that seam.",
+    },
+];
+
+/**
+ * Packages the local agent must never import by bare name — same reasoning as
+ * `l1CorePackageBans`. `jotai` is allowed only through `jotai/vanilla` if it
+ * is ever needed: the default entry re-exports the React bindings, and this
+ * package has to run with no React present.
+ */
+const l3LocalPackageBans = [
+    {
+        name: "jotai",
+        message:
+            "The local agent must import from 'jotai/vanilla', not the React-bearing default entry, if it ever needs jotai.",
+    },
+    {
+        name: "react",
+        message: "The local agent must not import React — it runs before any UI is mounted.",
+    },
+    {
+        name: "react-dom",
+        message: "The local agent must not import React — it runs before any UI is mounted.",
+    },
+];
+
+/** Import bans for the local agent core. Mirrors `l1CoreImportBans` exactly. */
+const l3LocalImportBans = [
+    {
+        group: ["**/agentDataProvider*", "**/agentDataProvider/**"],
+        message:
+            "The local agent must not import the Zotero data-provider handlers (agentDataProvider).",
+    },
+    {
+        group: [
+            "**/zoteroDataProvider",
+            "**/zoteroClientIdentity",
+            "**/zoteroSupabaseStorage",
+            "**/zoteroRuntime",
+            "**/EncryptedStorage",
+            "**/zoteroUtils",
+            "**/zoteroInstanceWire",
+            "**/busyContext",
+            "**/syncPause",
+            "**/libraryIdentity",
+            "**/utils/prefs",
+            "**/host/zotero",
+            "**/host/zotero/**",
+        ],
+        message:
+            "The local agent must not import Zotero adapter modules directly — these exist to keep this layer client-agnostic.",
+    },
+    {
+        group: ["**/react/atoms/*", "**/react/atoms/**"],
+        message: "The local agent must not import Jotai atoms (react/atoms).",
+    },
+    {
+        group: ["jotai/react", "jotai/react/**"],
+        message:
+            "The local agent must import from 'jotai/vanilla' — jotai's React entries pull in React, which this package must not require.",
+    },
+    {
+        group: ["**/react/store"],
+        message: "The local agent must not import the Jotai store (react/store).",
+    },
+    {
+        group: ["**/react/utils/*", "**/react/utils/**"],
+        message: "The local agent must not import react/utils — that pulls in the app graph.",
+    },
+    {
+        group: ["**/react/hooks/*", "**/react/hooks/**"],
+        message: "The local agent must not import React hooks (react/hooks).",
+    },
+    {
+        group: ["**/react/components/*", "**/react/components/**"],
+        message: "The local agent must not import React components (react/components).",
+    },
+];
+
+/**
+ * The `Zotero` global ban above covers value references but not `zotero-types`
+ * ambient TYPE namespaces, which are equally unavailable once the local agent
+ * is typechecked standalone (`npm run typecheck:local`).
+ */
+const l3LocalAmbientTypeBan = [
+    {
+        selector: 'Identifier[name="_ZoteroTypes"]',
+        message:
+            "The local agent must not use ambient Zotero types — it has to typecheck without zotero-types.",
+    },
+];
+
 export default tseslint.config(
     {
         ignores: [
@@ -626,6 +737,25 @@ export default tseslint.config(
             "no-restricted-globals": ["error", ...l2UiGlobals],
             "no-restricted-imports": ["error", { patterns: l2UiImportBans }],
             "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan],
+        },
+    },
+    // The in-plugin agent core (packages/agent-local) has the same isolation
+    // goal as the L1 core above: it must typecheck and run with no Zotero and
+    // no React/Jotai app graph present, so it gets the same stricter list
+    // rather than agent-ui's DOM-aware one. `npm run typecheck:local` is the
+    // stronger gate — it typechecks the package standalone and verifies its
+    // whole import closure stays inside the package — but it only sees files
+    // in the tsconfig `files` list; this block covers every file in the
+    // package as you write it.
+    {
+        files: ["packages/agent-local/src/**/*.ts"],
+        rules: {
+            "no-restricted-globals": ["error", ...l3LocalGlobals],
+            "no-restricted-imports": [
+                "error",
+                { paths: l3LocalPackageBans, patterns: l3LocalImportBans },
+            ],
+            "no-restricted-syntax": ["error", ...l3LocalAmbientTypeBan],
         },
     },
 );

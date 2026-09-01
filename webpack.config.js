@@ -43,7 +43,8 @@ export default (env, argv) => {
             extensions: ['.js', '.jsx', '.ts', '.tsx'],
             alias: {
                 '@beaver/agent-core': path.resolve(__dirname, 'packages', 'agent-core', 'src'),
-                '@beaver/agent-ui': path.resolve(__dirname, 'packages', 'agent-ui', 'src')
+                '@beaver/agent-ui': path.resolve(__dirname, 'packages', 'agent-ui', 'src'),
+                '@beaver/agent-local': path.resolve(__dirname, 'packages', 'agent-local', 'src')
             },
         },
         plugins: [
