@@ -22,9 +22,9 @@
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
-        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
-        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && NODE_ENV=development npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
-        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run check:bundle",
+        "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:local && npm run check:bundle",
+        "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && NODE_ENV=development npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:local && npm run check:bundle",
+        "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:local && npm run check:bundle",
         "check:bundle": "node scripts/check-esbuild-graph.mjs",
         "lint:check": "prettier --check . && eslint .",
         "lint:fix": "prettier --write . && eslint . --fix",
@@ -49,6 +49,7 @@
         "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
         "typecheck:core": "tsc -p packages/agent-core --noEmit && node packages/agent-core/verify-program.mjs",
         "typecheck:ui": "tsc -p packages/agent-ui --noEmit && node packages/agent-ui/verify-program.mjs",
+        "typecheck:local": "tsc -p packages/agent-local --noEmit && node packages/agent-local/verify-program.mjs",
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {

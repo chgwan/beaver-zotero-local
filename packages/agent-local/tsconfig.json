@@ -1,0 +1,35 @@
+{
+  // Standalone typecheck for the in-plugin agent.
+  // Compiled WITHOUT the zotero-types ambient globals; the only host globals
+  // available are the narrow declarations in globals.d.ts. `types: []` keeps
+  // @types packages out of the automatic program, and `verify-program.mjs`
+  // catches an explicit import reaching outside the package.
+  //
+  // When this package needs a host global, declare it in globals.d.ts. Do not
+  // add a `lib` entry that supplies it (DOM, WebWorker, …): each licenses a
+  // whole host surface, which is what globals.d.ts exists to prevent.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "types": [],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@beaver/agent-core/*": ["../agent-core/src/*"]
+    }
+  },
+  // The full transitive closure, listed explicitly so the package surface is
+  // readable. `verify-program.mjs` keeps this list honest.
+  "files": [
+    "./src/globals.d.ts",
+    "./src/version.ts",
+    "./src/index.ts"
+  ]
+}
