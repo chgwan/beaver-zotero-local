@@ -612,6 +612,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         allowed: isWebSearchAllowed,
         enabled: isWebSearchEnabled,
         localReason: localWebSearchStatus.reason,
+        hostUnconfirmed: localWebSearchStatus.hostUnconfirmed,
     });
     const webSearchTooltipContent = webSearchCopy.title;
     const webSearchDescription = webSearchCopy.description;

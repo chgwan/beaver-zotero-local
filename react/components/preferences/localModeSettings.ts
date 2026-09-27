@@ -74,19 +74,25 @@ export function parseLocalWebSearchMaxUsesInput(text: string): number | null {
 /**
  * Human label for a model's hosted web-search capability, shown next to the
  * web-search checkbox so the user knows what turning it on does for the
- * model they currently have selected.
+ * model they currently have selected. `hostUnconfirmed` (from
+ * `LocalWebSearchStatus`) is true only for an Anthropic-format model whose
+ * endpoint is not Anthropic's own API — support there is unconfirmed, unlike
+ * the other kinds, which are only ever reported for their one exact host.
  */
-export function localWebSearchCapabilityLabel(kind: HostedWebSearchKind | null): string {
-    switch (kind) {
-        case 'anthropic':
-            return 'Anthropic hosted search';
-        case 'openai-responses':
-            return 'OpenAI hosted search';
-        case 'openrouter':
-            return 'OpenRouter web search';
-        default:
-            return 'Not available for this provider';
-    }
+export function localWebSearchCapabilityLabel(kind: HostedWebSearchKind | null, hostUnconfirmed = false): string {
+    const label = (() => {
+        switch (kind) {
+            case 'anthropic':
+                return 'Anthropic hosted search';
+            case 'openai-responses':
+                return 'OpenAI hosted search';
+            case 'openrouter':
+                return 'OpenRouter web search';
+            default:
+                return 'Not available for this provider';
+        }
+    })();
+    return hostUnconfirmed ? `${label} (may not be supported by this endpoint)` : label;
 }
 
 /**
@@ -95,7 +101,7 @@ export function localWebSearchCapabilityLabel(kind: HostedWebSearchKind | null):
  * that this preference is the master switch behind the composer's
  * per-message web-search toggle.
  */
-export function localWebSearchDescription(kind: HostedWebSearchKind | null): string {
-    return `${localWebSearchCapabilityLabel(kind)}. Your provider may bill per search. `
+export function localWebSearchDescription(kind: HostedWebSearchKind | null, hostUnconfirmed = false): string {
+    return `${localWebSearchCapabilityLabel(kind, hostUnconfirmed)}. Your provider may bill per search. `
         + `This is the master switch — the composer's web-search toggle turns it on per message.`;
 }

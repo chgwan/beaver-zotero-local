@@ -14,6 +14,13 @@ export interface WebSearchToggleCopyInput {
     enabled: boolean;
     /** Why local web search is unavailable; ignored in cloud mode. */
     localReason: LocalWebSearchStatus['reason'];
+    /**
+     * True for an Anthropic-format model whose endpoint is not
+     * `api.anthropic.com` — hosted search there is unconfirmed, not merely
+     * unavailable, so the detail says so instead of the normal hosted-search
+     * copy. Ignored in cloud mode.
+     */
+    hostUnconfirmed?: LocalWebSearchStatus['hostUnconfirmed'];
 }
 
 export interface WebSearchToggleCopy {
@@ -26,6 +33,9 @@ export interface WebSearchToggleCopy {
 }
 
 const LOCAL_HOSTED_DETAIL = "Search the web with your provider's hosted search. Your provider may bill per search.";
+const LOCAL_HOSTED_DETAIL_HOST_UNCONFIRMED =
+    "Search the web with your provider's hosted search. Your provider may bill per search, "
+    + 'and may not be supported by this endpoint.';
 
 const localUnavailable = (reason: LocalWebSearchStatus['reason']): { title: string; detail: string } => {
     if (reason === 'off') {
@@ -46,7 +56,13 @@ const localUnavailable = (reason: LocalWebSearchStatus['reason']): { title: stri
     };
 };
 
-export function webSearchToggleCopy({ localMode, allowed, enabled, localReason }: WebSearchToggleCopyInput): WebSearchToggleCopy {
+export function webSearchToggleCopy({
+    localMode,
+    allowed,
+    enabled,
+    localReason,
+    hostUnconfirmed = false,
+}: WebSearchToggleCopyInput): WebSearchToggleCopy {
     if (!allowed) {
         if (localMode) {
             const { title, detail } = localUnavailable(localReason);
@@ -60,16 +76,17 @@ export function webSearchToggleCopy({ localMode, allowed, enabled, localReason }
         };
     }
     const description = enabled ? 'Web search is enabled.' : 'Web search is disabled.';
+    const hostedDetail = hostUnconfirmed ? LOCAL_HOSTED_DETAIL_HOST_UNCONFIRMED : LOCAL_HOSTED_DETAIL;
     if (enabled) {
         return {
             title: 'Stop requesting web search',
-            detail: localMode ? LOCAL_HOSTED_DETAIL : 'May still search the web when helpful',
+            detail: localMode ? hostedDetail : 'May still search the web when helpful',
             description,
         };
     }
     return {
         title: 'Request web search',
-        detail: localMode ? LOCAL_HOSTED_DETAIL : 'May search the web either way',
+        detail: localMode ? hostedDetail : 'May search the web either way',
         description,
     };
 }
