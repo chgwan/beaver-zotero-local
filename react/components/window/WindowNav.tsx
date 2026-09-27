@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { newThreadAtom, ThreadData } from '../../atoms/threads';
 import { userAtom } from '../../atoms/auth';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import { creditPlanAtom, hasCreditPlanAtom } from '../../atoms/profile';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useThreadHistory } from '../../hooks/useThreadHistory';
@@ -382,6 +383,7 @@ const WindowNav: React.FC<WindowNavProps> = ({ collapsed }) => {
  */
 const WindowAccountFooter: React.FC = () => {
     const user = useAtomValue(userAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const creditPlan = useAtomValue(creditPlanAtom);
     const hasCreditPlan = useAtomValue(hasCreditPlanAtom);
     const menuItems = useAccountMenuItems();
@@ -414,7 +416,7 @@ const WindowAccountFooter: React.FC = () => {
             ) : (
                 <div className="beaver-window-nav-account-content" style={{ padding: '6px 8px' }}>
                     <span className="beaver-window-nav-avatar"><Icon icon={UserIcon} /></span>
-                    <span className="beaver-window-nav-account-plan">Not signed in</span>
+                    <span className="beaver-window-nav-account-plan">{localMode ? 'Local mode' : 'Not signed in'}</span>
                 </div>
             )}
         </div>

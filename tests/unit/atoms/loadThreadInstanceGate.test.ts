@@ -11,6 +11,11 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
     agentService: { cancel: vi.fn() },
 }));
+// Stops the run through the cloud service, as outside local mode; the real
+// module pulls in the whole agent data provider.
+vi.mock('../../../react/runtime/localAgentService', () => ({
+    activeAgentService: () => ({ cancel: vi.fn() }),
+}));
 
 const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/threadService', () => ({

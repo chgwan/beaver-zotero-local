@@ -5,6 +5,8 @@ import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
 import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
+import { isLibraryScopeKnown } from "../../src/services/libraryScope";
+import { localModeEnabledAtom } from "./localMode";
 
 export const cloudConsentAtom = atom<'pending' | 'declined' | 'accepted'>('pending');
 
@@ -123,7 +125,21 @@ export const syncedLibraryIdsAtom = selectAtom(
     sameIds
 );
 
+/**
+ * The plugin realm's searchable set, re-read on every account publish.
+ *
+ * In local mode there is no profile: the plugin realm derives the scope from
+ * the local libraries and the local exclusion list, and publishes it before
+ * notifying renderers. Reading it here keeps the UI on the same allow/deny
+ * decisions the data handlers enforce.
+ */
+const pluginRealmScopeAtom = atom<number[] | null>((get) => {
+    get(accountRevisionAtom);
+    return isLibraryScopeKnown() ? [...(Zotero.Beaver?.searchableLibraryIds ?? [])] : null;
+});
+
 const searchableLibraryIdsSourceAtom = atom<number[]>((get) => {
+    if (get(localModeEnabledAtom)) return get(pluginRealmScopeAtom) ?? [];
     if (!get(isProfileLoadedAtom)) return [];
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
@@ -146,6 +162,13 @@ export const searchableLibraryIdsAtom = selectAtom(
 );
 
 const excludedLibraryIdsSourceAtom = atom<number[]>((get) => {
+    if (get(localModeEnabledAtom)) {
+        const searchable = get(pluginRealmScopeAtom);
+        if (!searchable) return [];
+        return get(localZoteroLibrariesAtom)
+            .filter(lib => !searchable.includes(lib.library_id))
+            .map(lib => lib.library_id);
+    }
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
     return get(localZoteroLibrariesAtom)
         .filter(lib => excluded.has(libraryExclusionKey(lib)))
@@ -170,6 +193,10 @@ export const excludedLibraryIdsAtom = selectAtom(
  * genuine "all libraries excluded" state.
  */
 export const isLibraryAccessReadyAtom = atom<boolean>((get) => {
+    if (get(localModeEnabledAtom)) {
+        return get(pluginRealmScopeAtom) !== null
+            && get(localZoteroLibrariesAtom).length > 0;
+    }
     return get(isProfileLoadedAtom)
         && get(profileWithPlanAtom) !== null
         && get(localZoteroLibrariesAtom).length > 0;

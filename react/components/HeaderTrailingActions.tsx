@@ -14,6 +14,7 @@ import {
     updateRequiredAtom,
 } from '../atoms/profile';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { localModeEnabledAtom } from '../atoms/localMode';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 
 /**
@@ -79,7 +80,10 @@ interface HeaderTrailingActionsProps {
 const HeaderTrailingActions: React.FC<HeaderTrailingActionsProps> = ({ children }) => {
     const isDatabaseSyncSupported = useAtomValue(isDatabaseSyncSupportedAtom);
     const currentMessageContent = useAtomValue(currentMessageContentAtom);
-    const showStatus = useShowHeaderStatus();
+    // The index and database status belong to the cloud services, which
+    // local mode does not use.
+    const localMode = useAtomValue(localModeEnabledAtom);
+    const showStatus = useShowHeaderStatus() && !localMode;
 
     return (
         <>

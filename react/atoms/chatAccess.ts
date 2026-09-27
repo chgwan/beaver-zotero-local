@@ -19,6 +19,7 @@ import {
     updateRequiredAtom,
 } from './profile';
 import { isLoadingThreadAtom } from './threads';
+import { localModeEnabledAtom } from './localMode';
 
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
@@ -36,6 +37,8 @@ export type ChatAccessGate =
 
 export const chatAccessGateAtom = atom<ChatAccessGate | null>((get) => {
     if (get(isLoadingThreadAtom) || get(isMigratingDataAtom)) return 'loading';
+    // Local mode has no account, so none of the account gates apply.
+    if (get(localModeEnabledAtom)) return null;
     if (!get(isAuthenticatedAtom)) return 'signed-out';
     if (!get(isProfileLoadedAtom)) return 'connecting';
     if (get(updateRequiredAtom)) return 'update-required';

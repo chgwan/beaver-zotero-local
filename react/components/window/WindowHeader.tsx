@@ -2,6 +2,7 @@ import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom, currentThreadNameAtom } from '@beaver/agent-core/run-state/atoms';
 import { isAuthenticatedAtom } from '../../atoms/auth';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import { toggleWindowNavAtom, windowNavCollapsedAtom } from '../../atoms/windowLayout';
 import { SidebarLeftIcon } from '../icons/icons';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
@@ -30,6 +31,7 @@ const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat }) => {
     // rename lands here without another subscription.
     const threadName = useAtomValue(currentThreadNameAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
 
     const title = threadId ? (threadName || 'Unnamed conversation') : 'New chat';
 
@@ -57,7 +59,7 @@ const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat }) => {
                 )}
             </div>
 
-            {isAuthenticated && (
+            {(isAuthenticated || localMode) && (
                 <div className="beaver-window-header-trail">
                     <HeaderTrailingActions />
                 </div>

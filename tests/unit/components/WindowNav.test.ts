@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('jotai', () => ({ useAtomValue: () => null, useSetAtom: () => vi.fn() }));
 vi.mock('../../../react/atoms/threads', () => ({ newThreadAtom: {} }));
 vi.mock('../../../react/atoms/auth', () => ({ userAtom: {} }));
+vi.mock('../../../react/atoms/localMode', () => ({ localModeEnabledAtom: {} }));
 vi.mock('../../../react/atoms/profile', () => ({ creditPlanAtom: {}, hasCreditPlanAtom: {} }));
 vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => window }));
 vi.mock('../../../react/hooks/useThreadHistory', () => ({ useThreadHistory: () => mocks.history }));

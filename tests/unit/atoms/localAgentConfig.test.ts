@@ -1,0 +1,55 @@
+import { createStore } from 'jotai';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { prefs } = vi.hoisted(() => ({ prefs: new Map<string, unknown>() }));
+
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: (key: string) => prefs.get(key),
+    setPref: (key: string, value: unknown) => prefs.set(key, value),
+}));
+vi.mock('../../../react/utils/popupMessageUtils', () => ({ addPopupMessageAtom: {} }));
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
+
+import { localAgentConfigInputAtom, localModeStatusAtom } from '../../../react/atoms/localAgentConfig';
+import { selectedModelAtom } from '../../../react/atoms/models';
+import { preferencesRevisionAtom } from '../../../react/atoms/preferences';
+
+const custom = {
+    name: 'Mine',
+    snapshot: 'llama',
+    api_key: 'k',
+    api_base: 'http://localhost:11434/v1',
+    format: 'openai' as const,
+};
+
+describe('localAgentConfigInputAtom', () => {
+    beforeEach(() => {
+        prefs.clear();
+    });
+
+    it('uses the selected custom model', () => {
+        const store = createStore();
+        store.set(selectedModelAtom, { id: 'c1', name: 'Mine', is_custom: true, custom_model: custom } as any);
+
+        expect(store.get(localAgentConfigInputAtom)).toEqual({ model: custom, maxRounds: null });
+        expect(store.get(localModeStatusAtom)).toMatchObject({ ok: true });
+    });
+
+    it('never runs a Beaver-hosted model', () => {
+        const store = createStore();
+        store.set(selectedModelAtom, { id: 'hosted', name: 'Hosted', allow_app_key: true } as any);
+
+        expect(store.get(localAgentConfigInputAtom).model).toBeNull();
+        expect(store.get(localModeStatusAtom)).toMatchObject({ ok: false, reason: 'no_model' });
+    });
+
+    it('reads a positive round cap and follows preference changes', () => {
+        const store = createStore();
+        prefs.set('localMaxRounds', 0);
+        expect(store.get(localAgentConfigInputAtom).maxRounds).toBeNull();
+
+        prefs.set('localMaxRounds', 7);
+        store.set(preferencesRevisionAtom, 1);
+        expect(store.get(localAgentConfigInputAtom).maxRounds).toBe(7);
+    });
+});

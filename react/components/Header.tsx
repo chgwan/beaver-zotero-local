@@ -9,6 +9,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { isAuthenticatedAtom } from '../atoms/auth';
+import { localModeEnabledAtom } from '../atoms/localMode';
 import { isThreadListViewAtom } from '../atoms/ui';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
 import HeaderTrailingActions, { useShowHeaderStatus } from './HeaderTrailingActions';
@@ -27,6 +28,9 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
+    // Local mode chats without an account.
+    const hasChatAccess = isAuthenticated || localMode;
     const showStatus = useShowHeaderStatus();
     const threadId = useAtomValue(currentThreadIdAtom);
     const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
@@ -79,7 +83,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                 )}
 
                 {/* Chat history and new chat */}
-                {isAuthenticated && showStatus && (
+                {hasChatAccess && showStatus && (
                     <>
                     <Tooltip content="Chat history" showArrow singleLine>
                         <IconButton
@@ -103,7 +107,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
             </div>
 
             {/* Right side: Current Context & Global Actions */}
-            {isAuthenticated && (
+            {hasChatAccess && (
                 <div className="display-flex gap-4 items-center">
                     <HeaderTrailingActions>
                         {threadId && !isFirstRunVisible && (
