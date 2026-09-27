@@ -1,0 +1,281 @@
+/**
+ * The local agent loop: prompt, stream, run tools, repeat.
+ *
+ * It emits the same frames as the hosted backend through `WSCallbacks`, so the
+ * renderer treats a local run like any other. All frames go through a
+ * `FrameEmitter`, which owns the coordinate rules; this loop decides what goes
+ * at each coordinate:
+ *
+ *  - Round `r` writes its assistant message at index `2r` and its tool
+ *    returns at `2r+1`. Within the message, a part index is claimed the first
+ *    time a kind of content appears (thinking, text) and never reassigned, and
+ *    tool calls follow in the order the provider sent them. Text is written at
+ *    exactly one coordinate, so it can never render twice.
+ *  - Every tool call gets exactly one tool return.
+ *  - A failing tool is not a failing run. Unparseable arguments and handler
+ *    errors go back to the model as failed tool returns so it can correct
+ *    itself; a call whose arguments did not parse is never executed.
+ *  - A cancelled run ends silently: the caller that aborted the signal owns
+ *    reporting it. A provider failure ends the run with an error and no
+ *    completion frames.
+ */
+
+import type { BeaverAgentPrompt, ModelRequestUsage, RunUsage } from '@beaver/agent-core/agents/types';
+import type { WSCallbacks, WSReadyData } from '@beaver/agent-core/protocol/agentProtocol';
+import { ProcessingMode, SubscriptionStatus } from '@beaver/agent-core/types/profile';
+import type { LocalAgentConfig } from '../config/localAgentConfig';
+import type { AccumulatedToolCall } from '../llm/toolCallAccumulator';
+import { LlmRequestError, type LlmClient, type LlmMessage, type LlmTurnResult, type LlmUsage } from '../llm/types';
+import type { LocalToolCatalog } from '../tools/toolCatalog';
+import { FrameEmitter, type RoundFrames } from './frameEmitter';
+import { buildSystemPrompt } from './systemPrompt';
+import { buildToolReturnMetadata } from './toolReturnMetadata';
+
+export interface LocalAgentLoopOptions {
+    runId: string;
+    /** The run's thread, or null to start a new one. */
+    threadId: string | null;
+    /** Mints the id announced via `onThread` when `threadId` is null. */
+    newThreadId: () => string;
+    /**
+     * The user's message. `content` becomes the user turn and
+     * `custom_instructions` is appended to the system prompt. Attachments,
+     * application state, and filters are not used by local mode yet.
+     */
+    userPrompt: BeaverAgentPrompt;
+    /** Earlier turns of the same thread, oldest first. */
+    history?: LlmMessage[];
+    config: LocalAgentConfig;
+    client: LlmClient;
+    catalog: LocalToolCatalog;
+    callbacks: WSCallbacks;
+    signal: AbortSignal;
+    /** Replaces the built-in system prompt. */
+    systemPrompt?: string;
+}
+
+/**
+ * Session data for `onReady`. A local run has no subscription, is processed
+ * entirely on this device, and uses no remote index.
+ */
+const LOCAL_READY_DATA: WSReadyData = {
+    subscriptionStatus: SubscriptionStatus.FREE,
+    processingMode: ProcessingMode.FRONTEND,
+    indexingComplete: false,
+};
+
+/** The outcome of one tool call, in both the forms the loop needs. */
+interface ToolCallOutcome {
+    outcome: 'success' | 'failed';
+    /** Rendered by the result card: the handler response, or an error message. */
+    content: Record<string, unknown> | string;
+    /** Sent back to the model. */
+    transcriptText: string;
+    metadata?: Record<string, unknown>;
+}
+
+const describeError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Sums per-round provider usage into the run's usage. */
+class UsageTally {
+    private readonly perRequest: ModelRequestUsage[] = [];
+    private requests = 0;
+    private toolCalls = 0;
+    private reported = false;
+
+    addRequest(usage: LlmUsage | null): void {
+        this.requests++;
+        if (!usage) return;
+        this.reported = true;
+        this.perRequest.push({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens });
+    }
+
+    addSuccessfulToolCall(): void {
+        this.toolCalls++;
+    }
+
+    /** Null when no request reported usage, so the UI shows none rather than zero. */
+    toRunUsage(): RunUsage | null {
+        if (!this.reported) return null;
+        let input = 0;
+        let output = 0;
+        for (const entry of this.perRequest) {
+            input += entry.input_tokens;
+            output += entry.output_tokens ?? 0;
+        }
+        return {
+            requests: this.requests,
+            tool_calls: this.toolCalls,
+            input_tokens: input,
+            output_tokens: output,
+            cache_write_tokens: 0,
+            cache_read_tokens: 0,
+            input_audio_tokens: 0,
+            cache_audio_read_tokens: 0,
+            model_requests: [...this.perRequest],
+        };
+    }
+}
+
+/**
+ * Stream one assistant turn into `frames`, then emit its tool calls.
+ *
+ * The client reports text and reasoning cumulatively, so each re-emit replaces
+ * the part at its coordinate. After the stream, the turn's final text is
+ * written to the same coordinate if it differs from the last streamed value
+ * (or claims one if nothing streamed) — a provider that also returns an
+ * aggregated message never produces a second copy.
+ */
+async function streamRound(
+    frames: RoundFrames,
+    options: LocalAgentLoopOptions,
+    transcript: LlmMessage[]
+): Promise<LlmTurnResult> {
+    const { client, config, catalog, signal } = options;
+    let nextPartIndex = 0;
+    let thinkingIndex: number | null = null;
+    let textIndex: number | null = null;
+    let lastThinking = '';
+    let lastText = '';
+
+    const writeThinking = (content: string) => {
+        if (thinkingIndex === null) thinkingIndex = nextPartIndex++;
+        lastThinking = content;
+        frames.thinking(thinkingIndex, content);
+    };
+    const writeText = (content: string) => {
+        if (textIndex === null) textIndex = nextPartIndex++;
+        lastText = content;
+        frames.text(textIndex, content);
+    };
+
+    const turn = await client.streamTurn(
+        { model: config.model, messages: transcript, tools: catalog.definitions() },
+        {
+            onThinkingDelta: (fullText) => {
+                if (fullText) writeThinking(fullText);
+            },
+            onTextDelta: (fullText) => {
+                if (fullText) writeText(fullText);
+            },
+        },
+        signal
+    );
+
+    if (turn.thinking && turn.thinking !== lastThinking) writeThinking(turn.thinking);
+    if (turn.text && turn.text !== lastText) writeText(turn.text);
+
+    for (const call of turn.toolCalls) {
+        frames.toolCall(nextPartIndex++, {
+            id: call.id,
+            name: call.name,
+            args: call.parseError ? call.rawArgs : call.args,
+        });
+    }
+    frames.sealParts();
+    return turn;
+}
+
+async function runToolCall(call: AccumulatedToolCall, catalog: LocalToolCatalog, signal: AbortSignal): Promise<ToolCallOutcome> {
+    if (call.parseError) {
+        const message = `The call to "${call.name}" was not run. ${call.parseError} Send the arguments again as a single JSON object.`;
+        return { outcome: 'failed', content: message, transcriptText: message };
+    }
+
+    const result = await catalog.execute(call.name, call.args, signal);
+    if (!result.ok) {
+        const message = result.retryable ? result.error : `${result.error} Retrying this call will not help.`;
+        return { outcome: 'failed', content: message, transcriptText: message };
+    }
+
+    return {
+        outcome: 'success',
+        content: result.content,
+        transcriptText: result.text,
+        metadata: buildToolReturnMetadata(call.name, result.content, call.args),
+    };
+}
+
+/**
+ * Run one local agent turn to completion, cancellation, or failure. Resolves
+ * in every case; outcomes are reported through `options.callbacks`.
+ */
+export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise<void> {
+    const { runId, config, catalog, callbacks, signal } = options;
+    const emitter = new FrameEmitter({ runId, callbacks });
+    const usage = new UsageTally();
+
+    const systemPrompt =
+        options.systemPrompt ??
+        buildSystemPrompt({
+            toolNames: catalog.definitions().map((tool) => tool.name),
+            customInstructions: options.userPrompt.custom_instructions,
+        });
+    const transcript: LlmMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...(options.history ?? []),
+        { role: 'user', content: options.userPrompt.content },
+    ];
+
+    callbacks.onReady(LOCAL_READY_DATA);
+    if (options.threadId === null) {
+        callbacks.onThread(options.newThreadId());
+    }
+
+    try {
+        for (let round = 0; round < config.maxRounds; round++) {
+            const frames = emitter.beginRound();
+            const turn = await streamRound(frames, options, transcript);
+            usage.addRequest(turn.usage);
+
+            if (turn.toolCalls.length === 0) {
+                emitter.finish(usage.toRunUsage());
+                return;
+            }
+
+            transcript.push({ role: 'assistant', content: turn.text, toolCalls: turn.toolCalls });
+
+            for (const call of turn.toolCalls) {
+                const result = await runToolCall(call, catalog, signal);
+                // Cancelled while the tool ran: the run is over, and its frames
+                // must not land on a run the UI has already stopped.
+                if (signal.aborted) return;
+                if (result.outcome === 'success') usage.addSuccessfulToolCall();
+
+                frames.toolReturn({
+                    part_kind: 'tool-return',
+                    tool_name: call.name,
+                    tool_call_id: call.id,
+                    content: result.content,
+                    outcome: result.outcome,
+                    ...(result.metadata ? { metadata: result.metadata } : {}),
+                });
+                transcript.push({ role: 'tool', content: result.transcriptText, toolCallId: call.id });
+            }
+        }
+
+        // Out of rounds with the model still calling tools. Stop cleanly: what
+        // it has written so far is more useful than an error.
+        callbacks.onWarning({
+            event: 'warning',
+            run_id: runId,
+            type: 'local_round_cap',
+            message:
+                `Stopped after ${config.maxRounds} rounds of tool calls without a final answer. ` +
+                'Send a follow-up to continue, or narrow the question.',
+        });
+        emitter.finish(usage.toRunUsage());
+    } catch (error) {
+        const cancelled = (error instanceof LlmRequestError && error.kind === 'cancelled') || signal.aborted;
+        if (cancelled) return;
+
+        emitter.fail({
+            type: error instanceof LlmRequestError ? 'local_provider_error' : 'local_agent_error',
+            message: describeError(error),
+            details: error instanceof LlmRequestError ? error.kind : undefined,
+            // Retrying goes through the backend thread service, which local
+            // mode does not use.
+            is_retryable: false,
+        });
+    }
+}

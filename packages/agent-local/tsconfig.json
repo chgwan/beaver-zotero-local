@@ -41,6 +41,9 @@
     "./src/llm/anthropicClient.ts",
     "./src/llm/clientForFormat.ts",
     "./src/run/frameEmitter.ts",
+    "./src/run/systemPrompt.ts",
+    "./src/run/toolReturnMetadata.ts",
+    "./src/run/localAgentLoop.ts",
     "./src/index.ts"
   ]
 }

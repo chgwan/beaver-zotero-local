@@ -42,9 +42,14 @@ export interface RoundFrames {
     /** Emit the full accumulated text so far for this part. */
     text(partIndex: number, content: string): void;
     thinking(partIndex: number, content: string): void;
+    /**
+     * Emit a tool call. `args` is the parsed object, or the raw text the
+     * provider sent when it did not parse, so a malformed call shows what the
+     * model actually wrote.
+     */
     toolCall(
         partIndex: number,
-        call: { id: string; name: string; args: Record<string, unknown> }
+        call: { id: string; name: string; args: Record<string, unknown> | string }
     ): void;
     /** Close this round's assistant message. No further parts are accepted. */
     sealParts(): void;
