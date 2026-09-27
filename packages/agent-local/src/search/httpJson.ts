@@ -8,6 +8,9 @@
  * Retries what retrying can fix — 429, 5xx, and a thrown network error (e.g. a
  * dropped connection) — up to `maxAttempts`. A 4xx other than 429 means the
  * query itself was wrong and will be wrong again, so those fail immediately.
+ * A 429 that reports an exhausted daily budget (see `isExhaustedBudget`) also
+ * fails immediately, on the first attempt — no amount of retrying resolves it
+ * before the source's own reset.
  *
  * `sleep` and `now` are injected so tests are deterministic and fast. `sleep`
  * takes the caller's `AbortSignal` so a backoff wait is interruptible — Stop
@@ -66,6 +69,29 @@ const retryAfterMs = (value: string | null): number | null => {
     return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds * 1000, MAX_BACKOFF_MS) : null;
 };
 
+/**
+ * A `Retry-After` this much longer than our own backoff schedule signals a
+ * quota reset, not a moment to wait out — retrying would just burn another
+ * attempt for the same answer.
+ */
+const RETRY_AFTER_GIVE_UP_SECONDS = 60;
+
+/**
+ * A 429 whose daily budget is spent will not succeed no matter how soon it is
+ * retried, unlike a transient per-second rate limit — retrying either wastes
+ * an attempt (a source like OpenAlex counts failed requests for free, so no
+ * quota is lost, but the caller still burns a round) or, for a caller that
+ * does count failures, makes the situation worse. OpenAlex documents
+ * `X-RateLimit-Remaining: 0` as exactly this signal; a `Retry-After` far
+ * longer than any transient limit would ever ask for is the same signal from
+ * a source that expresses it in seconds instead.
+ */
+const isExhaustedBudget = (headers: { get(name: string): string | null }): boolean => {
+    if (headers.get('X-RateLimit-Remaining') === '0') return true;
+    const retryAfterSeconds = Number(headers.get('Retry-After'));
+    return Number.isFinite(retryAfterSeconds) && retryAfterSeconds > RETRY_AFTER_GIVE_UP_SECONDS;
+};
+
 export async function fetchJson<T>(options: HttpJsonOptions): Promise<HttpJsonResult<T>> {
     const {
         url,
@@ -102,7 +128,12 @@ export async function fetchJson<T>(options: HttpJsonOptions): Promise<HttpJsonRe
             lastStatus = response.status;
             lastError = `${response.status} ${response.statusText}`;
 
-            if (!isRetryable(response.status) || attempt === maxAttempts - 1) {
+            const givesUpNow =
+                !isRetryable(response.status) ||
+                attempt === maxAttempts - 1 ||
+                (response.status === 429 && isExhaustedBudget(response.headers));
+
+            if (givesUpNow) {
                 return { ok: false, error: lastError, status: lastStatus };
             }
 

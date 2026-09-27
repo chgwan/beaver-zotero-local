@@ -46,6 +46,44 @@ describe('fetchJson', () => {
         expect(sleep).toHaveBeenCalledWith(2000, expect.any(AbortSignal));
     });
 
+    it('does not retry a 429 that reports an exhausted daily budget via X-RateLimit-Remaining: 0', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(json(429, {}, { 'x-ratelimit-remaining': '0' }));
+        vi.stubGlobal('fetch', fetchMock);
+        const result = await fetchJson({ url: 'https://x/y', signal: signal(), sleep: noSleep });
+        expect(result).toMatchObject({ ok: false, status: 429 });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('still retries a 429 when X-RateLimit-Remaining is above zero', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(json(429, {}, { 'x-ratelimit-remaining': '5' }))
+            .mockResolvedValueOnce(json(200, { results: [] }));
+        vi.stubGlobal('fetch', fetchMock);
+        const result = await fetchJson({ url: 'https://x/y', signal: signal(), sleep: noSleep });
+        expect(result.ok).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry a 429 whose Retry-After is far longer than this client\'s own backoff', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(json(429, {}, { 'retry-after': '120' }));
+        vi.stubGlobal('fetch', fetchMock);
+        const result = await fetchJson({ url: 'https://x/y', signal: signal(), sleep: noSleep });
+        expect(result).toMatchObject({ ok: false, status: 429 });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('still retries a 429 whose Retry-After is a short, ordinary backoff', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(json(429, {}, { 'retry-after': '2' }))
+            .mockResolvedValueOnce(json(200, { results: [] }));
+        vi.stubGlobal('fetch', fetchMock);
+        const result = await fetchJson({ url: 'https://x/y', signal: signal(), sleep: noSleep });
+        expect(result.ok).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it('gives up after the attempt limit and reports the status', async () => {
         const fetchMock = vi.fn().mockResolvedValue(json(429, {}));
         vi.stubGlobal('fetch', fetchMock);
