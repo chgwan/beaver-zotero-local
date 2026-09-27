@@ -221,6 +221,104 @@ describe('createOpenAiClient', () => {
         });
     });
 
+    it('replays a call whose arguments did not parse as an empty JSON object', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'hi' },
+                    {
+                        role: 'assistant',
+                        content: '',
+                        toolCalls: [
+                            {
+                                id: 'c1',
+                                name: 'zotero_search',
+                                args: {},
+                                rawArgs: '{"query": "unterminated',
+                                parseError: 'Tool arguments were not valid JSON',
+                            },
+                            {
+                                id: 'c2',
+                                name: 'zotero_search',
+                                args: {},
+                                rawArgs: '[1,2]',
+                                parseError: null,
+                            },
+                        ],
+                    },
+                    { role: 'tool', content: 'not run', toolCallId: 'c1' },
+                    { role: 'tool', content: 'not run', toolCallId: 'c2' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        const args = sent.messages[1].tool_calls.map((call: any) => call.function.arguments);
+        expect(args).toEqual(['{}', '{}']);
+        for (const text of args) expect(() => JSON.parse(text)).not.toThrow();
+    });
+
+    it('keeps index-less parallel calls apart by id, with id-less fragments on the last opened call', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"tool_calls":[{"id":"a","function":{"name":"first","arguments":"{\\"x\\":"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"1}"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"id":"b","function":{"name":"second","arguments":"{\\"y\\":"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"2}"}}]}}]}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls.map(({ id, name, args, parseError }) => ({ id, name, args, parseError }))).toEqual([
+            { id: 'a', name: 'first', args: { x: 1 }, parseError: null },
+            { id: 'b', name: 'second', args: { y: 2 }, parseError: null },
+        ]);
+    });
+
+    it('keeps parallel calls with neither index nor id apart by their position in the delta', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"first","arguments":"{\\"x\\":"}},{"function":{"name":"second","arguments":"{\\"y\\":"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"1}"}},{"function":{"arguments":"2}"}}]}}]}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls.map(({ name, args, parseError }) => ({ name, args, parseError }))).toEqual([
+            { name: 'first', args: { x: 1 }, parseError: null },
+            { name: 'second', args: { y: 2 }, parseError: null },
+        ]);
+    });
+
+    it('keeps interleaved indexed calls apart and ignores a repeated name', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"first","arguments":"{\\"x\\":"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{\\"y\\":"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"first","arguments":"1}"}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"2}"}}]}}]}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls.map(({ id, name, args }) => ({ id, name, args }))).toEqual([
+            { id: 'a', name: 'first', args: { x: 1 } },
+            { id: 'b', name: 'second', args: { y: 2 } },
+        ]);
+    });
+
     it('captures usage from a final chunk with empty choices', async () => {
         vi.stubGlobal(
             'fetch',

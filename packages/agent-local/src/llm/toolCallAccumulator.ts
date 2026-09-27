@@ -43,12 +43,17 @@ export class ToolCallAccumulator {
         return existing;
     }
 
-    /** Begin a call. Safe to call again for the same key: seeds only fill blanks. */
+    /**
+     * Begin a call. Safe to call again for the same key: seeds only fill
+     * blanks, so a provider that repeats the name on every fragment does not
+     * change it.
+     */
     open(key: number | string, seed: { id?: string; name?: string }): void {
         const slot = this.slot(key);
-        if (seed.id) slot.id = seed.id;
-        if (seed.name) slot.name = seed.name;
+        if (seed.id && !slot.id) slot.id = seed.id;
+        if (seed.name && !slot.name) slot.name = seed.name;
     }
+
 
     appendId(key: number | string, id: string): void {
         if (id) this.slot(key).id = id;

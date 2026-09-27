@@ -58,6 +58,23 @@ const readUsage = (frame: any): LlmUsage | null => {
     };
 };
 
+/**
+ * The accumulator slot a streamed tool-call fragment belongs to.
+ *
+ * `index` is the standard key. Some compatible servers omit it; then:
+ *  - a fragment with an `id` keys on that id, so each call keeps its own slot;
+ *  - a fragment with neither, in a delta that carries several calls, keys on
+ *    its position in that delta — parallel calls sent side by side;
+ *  - a lone fragment with neither continues the call opened last, which is
+ *    how such servers stream one call's arguments after its first fragment.
+ */
+const toolCallKey = (call: any, position: number, parallel: boolean, lastKey: string | null): string => {
+    if (typeof call?.index === 'number') return `index:${call.index}`;
+    if (typeof call?.id === 'string' && call.id.length > 0) return `id:${call.id}`;
+    if (parallel || lastKey === null) return `position:${position}`;
+    return lastKey;
+};
+
 const isAbortError = (error: unknown): boolean =>
     error instanceof Error && error.name === 'AbortError';
 
@@ -132,6 +149,7 @@ export function createOpenAiClient(): LlmClient {
             }
 
             const accumulator = new ToolCallAccumulator();
+            let lastKey: string | null = null;
             let text = '';
             let thinking = '';
             let finishReason: LlmFinishReason = 'unknown';
@@ -171,13 +189,15 @@ export function createOpenAiClient(): LlmClient {
                 }
 
                 if (Array.isArray(delta.tool_calls)) {
-                    for (const call of delta.tool_calls) {
-                        const key = typeof call.index === 'number' ? call.index : 0;
+                    const parallel = delta.tool_calls.length > 1;
+                    delta.tool_calls.forEach((call: any, position: number) => {
+                        const key = toolCallKey(call, position, parallel, lastKey);
+                        lastKey = key;
                         accumulator.open(key, { id: call.id, name: call.function?.name });
                         if (typeof call.function?.arguments === 'string') {
                             accumulator.appendArguments(key, call.function.arguments);
                         }
-                    }
+                    });
                 }
 
                 if (choice.finish_reason) {
