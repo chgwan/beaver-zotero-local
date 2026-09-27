@@ -81,3 +81,11 @@ describe('elideToolResults', () => {
         expect(fitted.filter((m) => m.role === 'tool').every((m) => m.content === ELIDED_TOOL_RESULT)).toBe(true);
     });
 });
+
+describe('estimateTokens with provider blocks', () => {
+    it('counts an assistant turn replayed from raw provider blocks', () => {
+        const blocks = [{ type: 'web_search_tool_result', content: [{ encrypted_content: big(1_000) }] }];
+        const plain: LlmMessage = { role: 'assistant', content: 'ok' };
+        expect(estimateTokens([{ ...plain, providerBlocks: blocks }])).toBeGreaterThan(estimateTokens([plain]) + 900);
+    });
+});

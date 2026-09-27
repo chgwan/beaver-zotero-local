@@ -708,3 +708,166 @@ describe('runLocalAgentLoop', () => {
         });
     });
 });
+
+describe('runLocalAgentLoop hosted web search', () => {
+    interface WebTurn {
+        text?: string;
+        finishReason?: LlmTurnResult['finishReason'];
+        toolCalls?: AccumulatedToolCall[];
+        citations?: { url: string; title: string }[];
+        providerBlocks?: unknown[];
+        warnings?: string[];
+        usage?: LlmUsage | null;
+    }
+
+    /** Replays turns and records each request as it was at call time. */
+    const webClient = (turns: WebTurn[]) => {
+        let i = 0;
+        const requests: any[] = [];
+        const client = {
+            streamTurn: vi.fn(async (request: any, handlers: any): Promise<LlmTurnResult> => {
+                requests.push({ ...request, messages: request.messages.map((m: any) => ({ ...m })) });
+                const turn = turns[Math.min(i++, turns.length - 1)];
+                if (turn.text) handlers.onTextDelta(turn.text);
+                for (const warning of turn.warnings ?? []) handlers.onWarning?.(warning);
+                return {
+                    text: turn.text ?? '',
+                    thinking: '',
+                    toolCalls: turn.toolCalls ?? [],
+                    finishReason: turn.finishReason ?? (turn.toolCalls?.length ? 'tool_calls' : 'stop'),
+                    usage: turn.usage ?? null,
+                    ...(turn.citations ? { citations: turn.citations } : {}),
+                    ...(turn.providerBlocks ? { providerBlocks: turn.providerBlocks } : {}),
+                };
+            }),
+        };
+        return { client, requests };
+    };
+
+    let callbacks: ReturnType<typeof recordingCallbacks>;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        callbacks = recordingCallbacks();
+    });
+
+    const textFrames = () => partsOf(callbacks).filter((e: any) => e.part.part_kind === 'text');
+
+    it('passes the web search option to every provider request', async () => {
+        const { client, requests } = webClient([
+            { toolCalls: [call('c0', { query: 'a' })] },
+            { text: 'Done.' },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true, maxUses: 3 } });
+        expect(requests).toHaveLength(2);
+        for (const request of requests) expect(request.webSearch).toEqual({ enabled: true, maxUses: 3 });
+    });
+
+    it('continues a paused turn instead of finishing, within the same round', async () => {
+        const paused = [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'q' } }];
+        const { client, requests } = webClient([
+            { text: 'Searching. ', finishReason: 'pause', providerBlocks: paused, usage: { inputTokens: 5, outputTokens: 1 } },
+            { text: 'Answer.', usage: { inputTokens: 7, outputTokens: 2 } },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true }, config: { ...config, maxRounds: 1 } });
+
+        expect(client.streamTurn).toHaveBeenCalledTimes(2);
+        // The continuation resends the transcript with the paused turn appended.
+        const continued = requests[1].messages;
+        expect(continued[continued.length - 1]).toEqual({ role: 'assistant', content: 'Searching. ', providerBlocks: paused });
+        expect(requests[1].messages.slice(0, -1)).toEqual(requests[0].messages);
+
+        // One text coordinate, holding the whole turn.
+        const texts = textFrames();
+        expect(new Set(texts.map((e: any) => `${e.message_index}:${e.part_index}`)).size).toBe(1);
+        expect(texts[texts.length - 1].part.content).toBe('Searching. Answer.');
+
+        // A pause does not use up a round: no round-cap warning, a normal finish.
+        expect(callbacks.onWarning).not.toHaveBeenCalled();
+        expect(callbacks.onError).not.toHaveBeenCalled();
+        expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+        // Each request's usage is counted.
+        expect(callbacks.onRunComplete.mock.calls[0][0].usage).toMatchObject({ requests: 2, input_tokens: 12, output_tokens: 3 });
+    });
+
+    it('replays paused turns before the tool calls of the same round', async () => {
+        const paused = [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'q' } }];
+        const final = [{ type: 'web_search_tool_result', tool_use_id: 's1', content: [] }, { type: 'tool_use', id: 'c0', name: 'zotero_search', input: {} }];
+        const { client, requests } = webClient([
+            { text: 'A. ', finishReason: 'pause', providerBlocks: paused },
+            { text: 'B.', toolCalls: [call('c0', {})], providerBlocks: final },
+            { text: 'Done.' },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const messages = requests[2].messages;
+        expect(messages.slice(-3)).toEqual([
+            { role: 'assistant', content: 'A. ', providerBlocks: paused },
+            { role: 'assistant', content: 'B.', toolCalls: [call('c0', {})], providerBlocks: final },
+            { role: 'tool', content: JSON.stringify({ items: [], total_count: 0 }), toolCallId: 'c0' },
+        ]);
+    });
+
+    it('stops continuing after repeated pauses and keeps the answer so far', async () => {
+        const { client } = webClient([{ text: 'Still searching.', finishReason: 'pause', providerBlocks: [{ type: 'server_tool_use' }] }]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        // The first request plus a bounded number of continuations.
+        expect(client.streamTurn.mock.calls.length).toBeGreaterThan(1);
+        expect(client.streamTurn.mock.calls.length).toBeLessThanOrEqual(6);
+        expect(callbacks.onWarning).toHaveBeenCalledTimes(1);
+        expect(callbacks.onWarning.mock.calls[0][0]).toMatchObject({ type: 'local_web_search' });
+        expect(callbacks.onError).not.toHaveBeenCalled();
+        expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+    });
+
+    it('appends a deduplicated Sources list at the same text coordinate', async () => {
+        const { client } = webClient([
+            {
+                text: 'Born in 1916.',
+                citations: [
+                    { url: 'https://a.example/1', title: 'Page [A]' },
+                    { url: 'https://b.example/2', title: 'B' },
+                ],
+            },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const texts = textFrames();
+        expect(new Set(texts.map((e: any) => `${e.message_index}:${e.part_index}`)).size).toBe(1);
+        expect(texts[texts.length - 1].part.content).toBe(
+            'Born in 1916.\n\nSources:\n- [Page \\[A\\]](https://a.example/1)\n- [B](https://b.example/2)'
+        );
+    });
+
+    it('merges citations across a paused turn without repeating a source', async () => {
+        const { client } = webClient([
+            { text: 'One. ', finishReason: 'pause', citations: [{ url: 'https://a.example', title: 'A' }], providerBlocks: [{ type: 'server_tool_use' }] },
+            { text: 'Two.', citations: [{ url: 'https://a.example', title: 'A' }, { url: 'https://c.example', title: 'C' }] },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const texts = textFrames();
+        expect(texts[texts.length - 1].part.content).toBe(
+            'One. Two.\n\nSources:\n- [A](https://a.example)\n- [C](https://c.example)'
+        );
+    });
+
+    it('carries the Sources list into the transcript for the next round', async () => {
+        const { client, requests } = webClient([
+            { text: 'Found it.', toolCalls: [call('c0', {})], citations: [{ url: 'https://a.example', title: 'A' }] },
+            { text: 'Done.' },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const assistant = requests[1].messages.find((m: any) => m.role === 'assistant');
+        expect(assistant.content).toBe('Found it.\n\nSources:\n- [A](https://a.example)');
+    });
+
+    it('surfaces a hosted search problem as a warning and finishes normally', async () => {
+        const { client } = webClient([{ text: 'From memory.', warnings: ['Web search reached its search limit for this turn.'] }]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        expect(callbacks.onWarning).toHaveBeenCalledTimes(1);
+        expect(callbacks.onWarning.mock.calls[0][0]).toMatchObject({
+            event: 'warning',
+            type: 'local_web_search',
+            message: 'Web search reached its search limit for this turn.',
+        });
+        expect(callbacks.onError).not.toHaveBeenCalled();
+        expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+    });
+});

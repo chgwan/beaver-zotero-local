@@ -73,7 +73,7 @@ export type {
     RoundFrames,
     SealedToolReturn,
 } from './run/frameEmitter';
-export { runLocalAgentLoop } from './run/localAgentLoop';
+export { runLocalAgentLoop, formatSources, MAX_PAUSE_CONTINUATIONS } from './run/localAgentLoop';
 export type { LocalAgentLoopOptions } from './run/localAgentLoop';
 export { buildRunHistory, estimateTokens, HISTORY_CONTEXT_SHARE } from './run/runHistory';
 export {

@@ -40,13 +40,19 @@ export const tokensForChars = (chars: number): number => Math.ceil(chars / CHARS
 const transcriptChars = (messages: readonly LlmMessage[]): number => {
     let chars = 0;
     for (const message of messages) {
+        // A turn replayed from raw provider blocks is sent as those blocks,
+        // which can hold whole search results.
+        if (message.providerBlocks?.length) {
+            chars += JSON.stringify(message.providerBlocks).length;
+            continue;
+        }
         chars += message.content.length;
         for (const call of message.toolCalls ?? []) chars += call.name.length + call.rawArgs.length;
     }
     return chars;
 };
 
-/** Estimated tokens of a transcript: message text and tool-call arguments. */
+/** Estimated tokens of a transcript: message text, tool-call arguments, and replayed provider blocks. */
 export function estimateTokens(messages: readonly LlmMessage[]): number {
     return tokensForChars(transcriptChars(messages));
 }
