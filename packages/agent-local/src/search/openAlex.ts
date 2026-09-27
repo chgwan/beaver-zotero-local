@@ -1,9 +1,11 @@
 /**
  * OpenAlex works search.
  *
- * OpenAlex retired its `mailto` polite pool; access is keyless with a small
- * daily credit budget, or via a free API key for a higher one. Both a spent
- * budget and more than 100 requests/second return 429.
+ * OpenAlex retired its `mailto` polite pool. Keyless access may be limited to
+ * a small daily credit budget (429 once spent) or may require an API key
+ * outright (401/403) — this client treats both the same way: no OpenAlex
+ * results, plus a note asking the user to add a free OpenAlex API key in
+ * preferences. A configured key removes both limits.
  */
 
 import { fetchJson, HostGate } from './httpJson';
@@ -30,7 +32,7 @@ export const OPENALEX_MIN_INTERVAL_MS = 100;
 
 /**
  * Paces requests to OpenAlex. The documented ceiling is 100 requests/second;
- * this stays two orders of magnitude under it — local mode makes a handful of
+ * this stays one order of magnitude under it — local mode makes a handful of
  * requests per run, not a stream, so this exists to be a good citizen rather
  * than to dodge a real limit. Module-level so it persists across catalog
  * rebuilds within one process, not just within one search.
@@ -157,6 +159,21 @@ export function createOpenAlexSource(options: { apiKey?: string } = {}): Scholar
                         error: apiKey
                             ? 'OpenAlex rate limit reached. Try again shortly.'
                             : 'OpenAlex rate limit reached — the keyless daily budget may be exhausted. Add a free OpenAlex API key in Beaver preferences for a higher limit.',
+                    };
+                }
+                // OpenAlex has been observed requiring a key outright (401/403)
+                // rather than only rate-limiting keyless calls — treated the
+                // same as the keyless 429: no results, same call to action.
+                if ((result.status === 401 || result.status === 403) && !apiKey) {
+                    return {
+                        ok: false,
+                        error: 'OpenAlex now requires an API key for this request. Add a free OpenAlex API key in Beaver preferences to search OpenAlex.',
+                    };
+                }
+                if ((result.status === 401 || result.status === 403) && apiKey) {
+                    return {
+                        ok: false,
+                        error: 'OpenAlex rejected the configured API key. Check the key in Beaver preferences.',
                     };
                 }
                 return { ok: false, error: `OpenAlex request failed: ${result.error}` };

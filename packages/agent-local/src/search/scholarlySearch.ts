@@ -9,6 +9,7 @@ export const MAX_RESULT_LIMIT = 25;
 
 export interface ScholarlySearchOptions {
     sources: ScholarlySource[];
+    /** Cap on the final merged/deduped/ranked result count — not a source's request size; see `ScholarlySearchQuery.limit`. Defaults to `DEFAULT_RESULT_LIMIT`, clamped to `MAX_RESULT_LIMIT`. */
     limit?: number;
 }
 
@@ -30,11 +31,46 @@ function normalizeTitle(title: string): string {
         .trim();
 }
 
-/** The record with the longer abstract wins a merge; a longer abstract gives the model more to work with. */
-function preferRicher(a: ScholarlyResult, b: ScholarlyResult): ScholarlyResult {
-    const lenA = a.abstract?.length ?? 0;
-    const lenB = b.abstract?.length ?? 0;
-    return lenB > lenA ? b : a;
+/**
+ * Combines two records the dedupe pass identified as the same work, field by
+ * field, rather than picking one record wholesale — a source with the
+ * richer abstract is not necessarily the one with the best citation count,
+ * OA link, or venue, and discarding the loser's better fields would silently
+ * degrade the card Task 5 renders from these results.
+ *
+ * `source`/`id`/`url` are the one exception: they identify *which* record a
+ * link resolves to, so they travel together and always come from `base` —
+ * whichever record was merged first. That is deterministic and independent
+ * of network timing, because sources are combined in `options.sources`
+ * order (see the `forEach` below), not the order their requests resolve.
+ */
+function mergeResults(base: ScholarlyResult, incoming: ScholarlyResult): ScholarlyResult {
+    const abstract =
+        (incoming.abstract?.length ?? 0) > (base.abstract?.length ?? 0) ? incoming.abstract : base.abstract;
+
+    const citationCount =
+        base.citationCount === null && incoming.citationCount === null
+            ? null
+            : Math.max(base.citationCount ?? -Infinity, incoming.citationCount ?? -Infinity);
+
+    return {
+        source: base.source,
+        id: base.id,
+        url: base.url,
+        title: base.title || incoming.title,
+        abstract,
+        authors: base.authors.length > 0 ? base.authors : incoming.authors,
+        year: base.year ?? incoming.year,
+        venue: base.venue ?? incoming.venue,
+        doi: base.doi ?? incoming.doi,
+        citationCount,
+        openAccessUrl: base.openAccessUrl ?? incoming.openAccessUrl,
+        pdfUrl: base.pdfUrl ?? incoming.pdfUrl,
+        isOpenAccess: base.isOpenAccess === true || incoming.isOpenAccess === true
+            ? true
+            : base.isOpenAccess ?? incoming.isOpenAccess,
+        publicationDate: base.publicationDate ?? incoming.publicationDate,
+    };
 }
 
 /**
@@ -44,9 +80,10 @@ function preferRicher(a: ScholarlyResult, b: ScholarlyResult): ScholarlyResult {
  * still yield the other's results, with a note the model can pass on. A search
  * that fails whenever either API hiccups is worse than no search.
  *
- * Dedupe prefers DOI and falls back to normalised title + year, because
- * preprints and older records often carry no DOI and duplicated titles are what
- * a user notices first.
+ * Dedupe keys on DOI and falls back to normalised title + year, because
+ * preprints and older records often carry no DOI and duplicated titles are
+ * what a user notices first. A duplicate is merged field by field (see
+ * `mergeResults`), not resolved by picking one source's record wholesale.
  */
 export async function runScholarlySearch(
     query: ScholarlySearchQuery,
@@ -84,7 +121,7 @@ export async function runScholarlySearch(
         const index = doiKey ? byDoi.get(key) : byTitleYear.get(key);
 
         if (index !== undefined) {
-            merged[index] = preferRicher(merged[index], result);
+            merged[index] = mergeResults(merged[index], result);
             continue;
         }
 

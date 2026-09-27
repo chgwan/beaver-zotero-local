@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchJson, HostGate } from '@beaver/agent-local/search/httpJson';
+import { fetchJson, HostGate, defaultSleep } from '@beaver/agent-local/search/httpJson';
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
     ok: status >= 200 && status < 300,
@@ -43,7 +43,7 @@ describe('fetchJson', () => {
                 .mockResolvedValueOnce(json(200, {}))
         );
         await fetchJson({ url: 'https://x/y', signal: signal(), sleep });
-        expect(sleep).toHaveBeenCalledWith(2000);
+        expect(sleep).toHaveBeenCalledWith(2000, expect.any(AbortSignal));
     });
 
     it('gives up after the attempt limit and reports the status', async () => {
@@ -100,6 +100,86 @@ describe('fetchJson', () => {
         });
         expect(fetchMock.mock.calls[0][1].headers['User-Agent']).toBe('Beaver');
     });
+
+    it('returns its cancelled result promptly when the caller aborts during backoff', async () => {
+        vi.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            const fetchMock = vi.fn().mockResolvedValue(json(429, {}));
+            vi.stubGlobal('fetch', fetchMock);
+
+            // No `sleep` override: this exercises the real default backoff
+            // wait (up to 8s) and proves it does not block Stop.
+            const pending = fetchJson({ url: 'https://x/y', signal: controller.signal });
+            await vi.advanceTimersByTimeAsync(0);
+            controller.abort();
+            await vi.advanceTimersByTimeAsync(0);
+
+            const result = await pending;
+            expect(result).toEqual({ ok: false, error: 'Cancelled.', status: null });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('defaultSleep', () => {
+    it('resolves immediately when the signal is already aborted', async () => {
+        vi.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            controller.abort();
+            let resolved = false;
+            defaultSleep(10_000, controller.signal).then(() => {
+                resolved = true;
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(resolved).toBe(true);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('resolves once the full duration elapses when never aborted', async () => {
+        vi.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            let resolved = false;
+            defaultSleep(1000, controller.signal).then(() => {
+                resolved = true;
+            });
+            await vi.advanceTimersByTimeAsync(999);
+            expect(resolved).toBe(false);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(resolved).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('resolves promptly on a mid-wait abort and leaves no pending timer', async () => {
+        vi.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            let resolved = false;
+            defaultSleep(10_000, controller.signal).then(() => {
+                resolved = true;
+            });
+            await vi.advanceTimersByTimeAsync(1);
+            expect(vi.getTimerCount()).toBe(1);
+
+            controller.abort();
+            await vi.advanceTimersByTimeAsync(0);
+
+            expect(resolved).toBe(true);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 describe('HostGate', () => {
@@ -116,7 +196,60 @@ describe('HostGate', () => {
         const gate = new HostGate(1000, { sleep, now: clock.now });
         await gate.wait(signal());
         await gate.wait(signal());
-        expect(sleep).toHaveBeenCalledWith(1000);
+        expect(sleep).toHaveBeenCalledWith(1000, expect.any(AbortSignal));
+    });
+
+    it('does not advance the pacing window when a wait is aborted before completing', async () => {
+        const clock = fakeClock();
+        const waited: number[] = [];
+        // Not abort-aware itself — proves HostGate's own post-wait guard
+        // (not the sleep implementation) is what protects the pacing state.
+        const sleep = vi.fn(async (ms: number) => {
+            waited.push(ms);
+        });
+        const gate = new HostGate(1000, { sleep, now: clock.now });
+
+        // First wait opens the pacing window (no delay yet, so no sleep call).
+        await gate.wait(signal());
+
+        // Second wait needs to sleep — abort while the mock sleep is in
+        // flight, before HostGate's post-wait check runs.
+        const controller = new AbortController();
+        const aborted = gate.wait(controller.signal);
+        controller.abort();
+        await aborted;
+
+        // A real, non-aborted wait afterwards sees the same window as if
+        // the aborted wait had never touched it.
+        await gate.wait(signal());
+        expect(waited).toEqual([1000, 1000]);
+    });
+
+    it('releases a real wait promptly on abort without leaking a pending timer', async () => {
+        vi.useFakeTimers();
+        try {
+            const clock = fakeClock();
+            const gate = new HostGate(1000, { now: clock.now });
+            await gate.wait(signal());
+
+            const controller = new AbortController();
+            let released = false;
+            const pending = gate.wait(controller.signal).then(() => {
+                released = true;
+            });
+
+            await vi.advanceTimersByTimeAsync(1);
+            expect(released).toBe(false);
+
+            controller.abort();
+            await vi.advanceTimersByTimeAsync(0);
+            await pending;
+
+            expect(released).toBe(true);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 

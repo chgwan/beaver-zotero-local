@@ -5,10 +5,13 @@
  * report one failure alongside the other's results, and an exception would
  * discard both.
  *
- * Retries only what retrying can fix — 429 and 5xx. A 400 means the query was
- * wrong and will be wrong again.
+ * Retries what retrying can fix — 429, 5xx, and a thrown network error (e.g. a
+ * dropped connection) — up to `maxAttempts`. A 4xx other than 429 means the
+ * query itself was wrong and will be wrong again, so those fail immediately.
  *
- * `sleep` and `now` are injected so tests are deterministic and fast.
+ * `sleep` and `now` are injected so tests are deterministic and fast. `sleep`
+ * takes the caller's `AbortSignal` so a backoff wait is interruptible — Stop
+ * must not have to wait out an 8-second retry delay.
  */
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
@@ -22,14 +25,37 @@ export interface HttpJsonOptions {
     signal: AbortSignal;
     timeoutMs?: number;
     maxAttempts?: number;
-    sleep?: (ms: number) => Promise<void>;
+    sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export type HttpJsonResult<T> =
     | { ok: true; data: T }
     | { ok: false; error: string; status: number | null };
 
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Waits `ms`, or returns as soon as `signal` aborts — whichever comes first —
+ * always clearing its timer and removing its listener so neither outlives the
+ * call. Exported for direct testing; `fetchJson` and `HostGate` use it as
+ * their default.
+ */
+export function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+        if (signal.aborted) {
+            resolve();
+            return;
+        }
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+        };
+        const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal.addEventListener('abort', onAbort);
+    });
+}
 
 const isRetryable = (status: number): boolean => status === 429 || status >= 500;
 
@@ -81,7 +107,7 @@ export async function fetchJson<T>(options: HttpJsonOptions): Promise<HttpJsonRe
             }
 
             const advised = retryAfterMs(response.headers.get('Retry-After'));
-            await sleep(advised ?? Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS));
+            await sleep(advised ?? Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS), signal);
         } catch (error) {
             if (signal.aborted) return { ok: false, error: 'Cancelled.', status: null };
             lastStatus = null;
@@ -89,7 +115,7 @@ export async function fetchJson<T>(options: HttpJsonOptions): Promise<HttpJsonRe
             if (attempt === maxAttempts - 1) {
                 return { ok: false, error: lastError, status: null };
             }
-            await sleep(Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS));
+            await sleep(Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS), signal);
         } finally {
             clearTimeout(timeout);
             signal.removeEventListener('abort', onAbort);
@@ -100,7 +126,7 @@ export async function fetchJson<T>(options: HttpJsonOptions): Promise<HttpJsonRe
 }
 
 export interface HostGateDeps {
-    sleep?: (ms: number) => Promise<void>;
+    sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
     now?: () => number;
 }
 
@@ -114,7 +140,7 @@ export interface HostGateDeps {
  */
 export class HostGate {
     private nextAllowedAt = 0;
-    private readonly sleep: (ms: number) => Promise<void>;
+    private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
     private readonly now: () => number;
 
     constructor(
@@ -128,7 +154,11 @@ export class HostGate {
     async wait(signal: AbortSignal): Promise<void> {
         if (signal.aborted) return;
         const delay = this.nextAllowedAt - this.now();
-        if (delay > 0) await this.sleep(delay);
+        if (delay > 0) await this.sleep(delay, signal);
+        // An aborted wait never happened as far as pacing is concerned — the
+        // request it was gating won't be made, so it must not consume this
+        // host's slot and delay the next, real request.
+        if (signal.aborted) return;
         this.nextAllowedAt = this.now() + this.minIntervalMs;
     }
 }
