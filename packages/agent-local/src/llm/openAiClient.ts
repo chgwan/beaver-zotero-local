@@ -20,6 +20,7 @@ import {
     type LlmStreamHandlers,
     type LlmTurnRequest,
     type LlmTurnResult,
+    type LlmUsage,
 } from './types';
 
 const wireMessage = (message: LlmMessage): Record<string, unknown> => {
@@ -49,6 +50,19 @@ const mapFinishReason = (reason: string | null | undefined): LlmFinishReason => 
     return 'unknown';
 };
 
+/** Read `usage` off a frame, if it carries one. A frame with no usage yields null. */
+const readUsage = (frame: any): LlmUsage | null => {
+    const usage = frame?.usage;
+    if (!usage || typeof usage !== 'object') return null;
+    return {
+        inputTokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0,
+        outputTokens: typeof usage.completion_tokens === 'number' ? usage.completion_tokens : 0,
+    };
+};
+
+const isAbortError = (error: unknown): boolean =>
+    error instanceof Error && error.name === 'AbortError';
+
 export function createOpenAiClient(): LlmClient {
     return {
         async streamTurn(
@@ -77,6 +91,11 @@ export function createOpenAiClient(): LlmClient {
             if (model.reasoning_effort) {
                 payload.reasoning_effort = model.reasoning_effort;
             }
+            // Deliberately not requesting `stream_options: { include_usage: true }`:
+            // it is an OpenAI extension some OpenAI-compatible servers reject as an
+            // unknown field, and the user's own endpoint must keep working
+            // unchanged. Usage is read opportunistically from whatever a given
+            // provider sends instead.
 
             const url = joinEndpoint(model.api_base ?? '', 'chat/completions');
 
@@ -92,6 +111,9 @@ export function createOpenAiClient(): LlmClient {
                     signal,
                 });
             } catch (error) {
+                if (signal.aborted || isAbortError(error)) {
+                    throw new LlmRequestError('cancelled', 'The request was cancelled.');
+                }
                 throw new LlmRequestError(
                     'network',
                     `Could not reach ${url}: ${
@@ -115,6 +137,7 @@ export function createOpenAiClient(): LlmClient {
             let text = '';
             let thinking = '';
             let finishReason: LlmFinishReason = 'unknown';
+            let usage: LlmUsage | null = null;
 
             for await (const event of readSseEvents(response.body, signal)) {
                 if (event.data === '[DONE]') break;
@@ -126,6 +149,11 @@ export function createOpenAiClient(): LlmClient {
                     // A keep-alive or partial frame; the next one carries the state.
                     continue;
                 }
+
+                // Usage can arrive on any chunk, including a final one with no
+                // (or empty) `choices` — read it before that guard drops the chunk.
+                const chunkUsage = readUsage(frame);
+                if (chunkUsage) usage = chunkUsage;
 
                 const choice = frame?.choices?.[0];
                 if (!choice) continue;
@@ -159,13 +187,21 @@ export function createOpenAiClient(): LlmClient {
                 }
             }
 
+            // A signal that fired mid-stream must not be swallowed into a
+            // partial success: the loop reads `signal.aborted` to tell a
+            // user-requested stop from a provider failure, and needs a
+            // consistent answer regardless of when the abort landed.
+            if (signal.aborted) {
+                throw new LlmRequestError('cancelled', 'The request was cancelled.');
+            }
+
             const toolCalls = accumulator.close();
             // Some servers omit finish_reason but do stream tool calls.
             if (finishReason === 'unknown' && toolCalls.length > 0) {
                 finishReason = 'tool_calls';
             }
 
-            return { text, thinking, toolCalls, finishReason };
+            return { text, thinking, toolCalls, finishReason, usage };
         },
     };
 }

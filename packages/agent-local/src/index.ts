@@ -40,6 +40,7 @@ export type {
     LlmTurnResult,
     LlmTurnRequest,
     LlmErrorKind,
+    LlmUsage,
 } from './llm/types';
 export { FrameEmitter } from './run/frameEmitter';
 export type {
