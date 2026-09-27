@@ -166,6 +166,17 @@ describe('createAnthropicClient', () => {
         expect(fetchMock.mock.calls[0][0]).toBe('https://api.anthropic.com/v1/messages');
     });
 
+    it('sends no x-api-key header when the model has no API key', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({ model: { ...model, api_key: '', api_base: 'http://localhost:8080' } }),
+            handlers(),
+            signal()
+        );
+        expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-api-key');
+    });
+
     it('sends tools in the Anthropic input_schema envelope', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
         vi.stubGlobal('fetch', fetchMock);

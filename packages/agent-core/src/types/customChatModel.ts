@@ -31,7 +31,16 @@ const isObject = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null;
 };
 
-export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
+export interface CustomChatModelCheckOptions {
+    /**
+     * Accept a blank `api_key` for this endpoint. Local mode passes a
+     * loopback check here so a keyless server on the user's own machine
+     * counts as configured; by default every model needs a key.
+     */
+    allowBlankApiKey?: (apiBase: string | undefined) => boolean;
+}
+
+export const isCustomChatModel = (obj: unknown, options: CustomChatModelCheckOptions = {}): obj is CustomChatModel => {
     if (!isObject(obj)) return false;
 
     const {
@@ -47,7 +56,9 @@ export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     } = obj as Record<string, unknown>;
 
     // Required fields
-    if (typeof api_key !== 'string' || api_key.trim().length === 0) return false;
+    if (typeof api_key !== 'string') return false;
+    if (api_key.trim().length === 0
+        && !options.allowBlankApiKey?.(typeof api_base === 'string' ? api_base : undefined)) return false;
     if (typeof name !== 'string' || name.trim().length === 0) return false;
     if (typeof snapshot !== 'string' || snapshot.trim().length === 0) return false;
 

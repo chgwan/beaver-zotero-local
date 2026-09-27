@@ -121,7 +121,8 @@ export function createOpenAiClient(): LlmClient {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        Authorization: `Bearer ${model.api_key}`,
+                        // A keyless local server gets no auth header at all.
+                        ...(model.api_key?.trim() ? { Authorization: `Bearer ${model.api_key}` } : {}),
                     },
                     body: JSON.stringify(payload),
                     signal,

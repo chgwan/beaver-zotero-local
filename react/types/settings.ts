@@ -3,6 +3,8 @@ import { store } from "../store";
 import { addPopupMessageAtom } from "../utils/popupMessageUtils";
 import { ProcessingMode } from "@beaver/agent-core/types/profile";
 import { CustomChatModel, isCustomChatModel, OPENROUTER_API_BASE } from "@beaver/agent-core/types/customChatModel";
+import { isLoopbackEndpoint } from "@beaver/agent-local/config/localAgentConfig";
+import { isLocalMode } from "../atoms/localMode";
 
 export * from "@beaver/agent-core/types/customChatModel";
 
@@ -35,7 +37,10 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
         if (raw && typeof raw === 'string') {
             const parsed = JSON.parse(raw as string);
             if (!Array.isArray(parsed)) throw new Error("customChatModels preference must be an array");
-            return parsed.map(withDefaultEndpoint).filter(isCustomChatModel);
+            // Local mode runs keyless servers on this machine; the hosted
+            // path requires a key for every custom model.
+            const options = isLocalMode() ? { allowBlankApiKey: isLoopbackEndpoint } : {};
+            return parsed.map(withDefaultEndpoint).filter((entry): entry is CustomChatModel => isCustomChatModel(entry, options));
         }
     } catch (e) {
         console.error("Error parsing customChatModels:", e);

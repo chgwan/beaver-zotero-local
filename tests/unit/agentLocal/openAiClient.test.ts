@@ -133,6 +133,17 @@ describe('createOpenAiClient', () => {
         expect(JSON.parse(fetchMock.mock.calls[1][1].body).tool_choice).toBeUndefined();
     });
 
+    it('sends no Authorization header when the model has no API key', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(
+            turn({ model: { ...model, api_key: '', api_base: 'http://localhost:11434/v1' } }),
+            handlers(),
+            signal()
+        );
+        expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('Authorization');
+    });
+
     it('omits the tools field entirely when there are none', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
         vi.stubGlobal('fetch', fetchMock);
