@@ -161,6 +161,33 @@ describe('createOpenAlexSource', () => {
         expect(outcome.error.toLowerCase()).toContain('api key');
     });
 
+    it.each([401, 403])(
+        'treats a keyless %d the same as a keyless 429: no results, add-a-key note',
+        async (status) => {
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(status, {})));
+            const { createOpenAlexSource } = await loadModule();
+
+            const outcome = await createOpenAlexSource().search({ query: 'x', limit: 5 }, signal());
+            expect(outcome.ok).toBe(false);
+            if (outcome.ok) return;
+            expect(outcome.error.toLowerCase()).toContain('api key');
+        }
+    );
+
+    it('tells the user their configured key was rejected on a keyed 401/403, rather than asking them to add one', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(401, {})));
+        const { createOpenAlexSource } = await loadModule();
+
+        const outcome = await createOpenAlexSource({ apiKey: 'secret-key' }).search(
+            { query: 'x', limit: 5 },
+            signal()
+        );
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.error.toLowerCase()).toContain('key');
+        expect(outcome.error.toLowerCase()).not.toContain('add a free');
+    });
+
     it('skips a malformed work instead of failing the whole search', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(200, fixture)));
         const { createOpenAlexSource } = await loadModule();

@@ -31,6 +31,7 @@ export interface ScholarlyResult {
 
 export interface ScholarlySearchQuery {
     query: string;
+    /** How many results to request from *each* source — not the final merged count; see `ScholarlySearchOptions.limit`. */
     limit: number;
     yearFrom?: number;
     yearTo?: number;
