@@ -139,6 +139,7 @@ describe('createAnthropicClient', () => {
         expect(url).toBe('https://api.anthropic.com/v1/messages');
         expect(init.headers['x-api-key']).toBe('sk-ant-test');
         expect(init.headers['anthropic-version']).toBe(ANTHROPIC_VERSION);
+        expect(init.headers['anthropic-dangerous-direct-browser-access']).toBe('true');
         expect(init.headers).not.toHaveProperty('Authorization');
         expect(JSON.parse(init.body).max_tokens).toBeGreaterThan(0);
     });
@@ -236,8 +237,114 @@ describe('createAnthropicClient', () => {
             signal()
         );
         const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(sent.messages).toHaveLength(2);
-        expect(sent.messages[1].content).toHaveLength(2);
+        // The leading user turn and the two tool results are all `user`-role
+        // wire entries with nothing from the other role between them, so a
+        // role-alternating transcript merges all three into one message.
+        expect(sent.messages).toHaveLength(1);
+        expect(sent.messages[0].content).toHaveLength(3);
+    });
+
+    it('merges two consecutive plain user messages into one', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'first' },
+                    { role: 'user', content: 'second' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(sent.messages).toEqual([
+            {
+                role: 'user',
+                content: [
+                    { type: 'text', text: 'first' },
+                    { type: 'text', text: 'second' },
+                ],
+            },
+        ]);
+    });
+
+    it('merges a tool-result message with a following plain user message', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'tool', content: '{"results":[]}', toolCallId: 't1' },
+                    { role: 'user', content: 'and also this' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(sent.messages).toEqual([
+            {
+                role: 'user',
+                content: [
+                    { type: 'tool_result', tool_use_id: 't1', content: '{"results":[]}' },
+                    { type: 'text', text: 'and also this' },
+                ],
+            },
+        ]);
+    });
+
+    it('merges two consecutive assistant messages into one', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'hi' },
+                    { role: 'assistant', content: 'partial' },
+                    {
+                        role: 'assistant',
+                        content: '',
+                        toolCalls: [
+                            {
+                                id: 'toolu_1',
+                                name: 'zotero_search',
+                                args: { query: 'x' },
+                                rawArgs: '{"query":"x"}',
+                                parseError: null,
+                            },
+                        ],
+                    },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(sent.messages[1]).toEqual({
+            role: 'assistant',
+            content: [
+                { type: 'text', text: 'partial' },
+                { type: 'tool_use', id: 'toolu_1', name: 'zotero_search', input: { query: 'x' } },
+            ],
+        });
+    });
+
+    it('drops a leading assistant message so the transcript never opens with one', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'assistant', content: 'stray reply' },
+                    { role: 'user', content: 'hi' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(sent.messages).toEqual([{ role: 'user', content: 'hi' }]);
     });
 
     it('surfaces an error event mid-stream as a provider error', async () => {
