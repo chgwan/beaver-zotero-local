@@ -12,6 +12,7 @@ import React, { useCallback, useState } from 'react';
 import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
 import { userAtom } from '../../../atoms/auth';
+import { localModeEnabledAtom } from '../../../atoms/localMode';
 import {
     currentThreadPinnedAtom,
     isPinPending,
@@ -44,6 +45,40 @@ interface ThreadMenuButtonProps {
     inWindow?: boolean;
 }
 
+export type ThreadMenuItemKey =
+    | 'rename' | 'pin' | 'delete' | 'housekeeping-divider'
+    | 'find' | 'open-in-window' | 'find-divider'
+    | 'copy' | 'save-note' | 'save-child-note' | 'copy-link';
+
+export interface ThreadMenuVisibilityInput {
+    /** No local mode item is persisted server-side, so nothing here is either. */
+    localMode: boolean;
+    /** Rendered in the separate Beaver window, where "open in window" is moot. */
+    inWindow: boolean;
+}
+
+/**
+ * Which thread-menu entries to show, in order.
+ *
+ * Rename, pin, delete, "Open in Beaver window" and "Copy link to chat" all go
+ * through the Beaver backend or a persisted, shareable thread record — neither
+ * exists in local mode, so all five are hidden together rather than left to
+ * fail against the blocked backend. The housekeeping divider is hidden with
+ * the group it separates, so local mode never shows a leading separator.
+ */
+export function threadMenuItemKeys({ localMode, inWindow }: ThreadMenuVisibilityInput): ThreadMenuItemKey[] {
+    return [
+        ...(localMode ? [] : (['rename', 'pin', 'delete', 'housekeeping-divider'] as ThreadMenuItemKey[])),
+        'find',
+        ...(!inWindow && !localMode ? (['open-in-window'] as ThreadMenuItemKey[]) : []),
+        'find-divider',
+        'copy',
+        'save-note',
+        'save-child-note',
+        ...(localMode ? [] : (['copy-link'] as ThreadMenuItemKey[])),
+    ];
+}
+
 const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     className = '',
     ariaLabel = 'Chat actions',
@@ -52,6 +87,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const surfaceWindow = useSurfaceWindow();
     const [, forceUpdate] = useState({});
     const threadId = useAtomValue(currentThreadIdAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const canOpenFinishedChat = useAtomValue(canOpenFinishedChatAtom);
     // Derived from the thread store, so this entry cannot disagree with the
     // chat lists. `null` means the open chat is not in the store yet — a
@@ -88,10 +124,14 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const handleMenuToggle = useCallback((isOpen: boolean) => {
         if (!isOpen) return;
         forceUpdate({});
+        // Neither pin state nor finished-chat availability has a local-mode
+        // meaning: pin/delete/open-in-window are hidden entirely below, so
+        // there is nothing here for either read to back.
+        if (localMode) return;
         void resolvePinnedState();
         setAvailabilityPending(true);
         void store.set(refreshFinishedChatAvailabilityAtom).finally(() => setAvailabilityPending(false));
-    }, [resolvePinnedState]);
+    }, [resolvePinnedState, localMode]);
 
     // The menu's content is built when it is opened, so the runs and their tool
     // results are read then rather than subscribed to — subscribing would
@@ -290,14 +330,16 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
         // The chat's own housekeeping first, then ways to look at it, then
-        // ways to take it elsewhere.
-        const items: MenuItem[] = [
-            {
+        // ways to take it elsewhere. `threadMenuItemKeys` decides which of
+        // these exist at all (backend-backed entries are absent, not merely
+        // disabled, in local mode); this just supplies their content.
+        const definitions: Record<Exclude<ThreadMenuItemKey, 'housekeeping-divider' | 'find-divider'>, MenuItem> = {
+            rename: {
                 label: 'Rename chat',
                 onClick: handleRenameChat,
                 disabled: !threadId,
             },
-            {
+            pin: {
                 label: isPinned ? 'Unpin chat' : 'Pin chat',
                 onClick: handleTogglePin,
                 disabled: !threadId || isPinned === null || pinPending,
@@ -310,24 +352,19 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                     </span>
                 ) : undefined,
             },
-            {
+            delete: {
                 label: 'Delete chat',
                 onClick: handleDeleteChat,
                 disabled: !threadId,
             },
-            {
-                label: 'thread-actions-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
+            find: {
                 // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
                 // that also opens the bar is not shown here.
                 label: 'Find in chat',
                 onClick: findControls.open,
                 disabled: !hasRuns || !findControls.isAvailable,
             },
-            ...(!inWindow ? [{
+            'open-in-window': {
                 label: "Open in Beaver window",
                 disabled: !canOpenFinishedChat,
                 customContent: !canOpenFinishedChat && !availabilityPending ? <div>
@@ -340,34 +377,36 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                             threadId,
                         }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
                 },
-            }] : []),
-            {
-                label: 'find-in-chat-divider',
-                onClick: () => {},
-                isDivider: true,
             },
-            {
+            copy: {
                 label: 'Copy entire chat',
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
-            {
+            'save-note': {
                 label: 'Save chat as note',
                 onClick: handleSaveAsNote,
                 disabled: !hasRuns,
             },
-            {
+            'save-child-note': {
                 label: 'Save chat as child note',
                 onClick: handleSaveAsChildNote,
                 disabled: !hasParent || !hasRuns,
             },
-            {
+            'copy-link': {
                 label: 'Copy link to chat',
                 onClick: handleCopyThreadUrl,
                 disabled: !threadId,
             },
-        ];
-        return items;
+        };
+        const dividers: Record<'housekeeping-divider' | 'find-divider', MenuItem> = {
+            'housekeeping-divider': { label: 'thread-actions-divider', onClick: () => {}, isDivider: true },
+            'find-divider': { label: 'find-in-chat-divider', onClick: () => {}, isDivider: true },
+        };
+
+        return threadMenuItemKeys({ localMode, inWindow }).map(
+            (key) => (key === 'housekeeping-divider' || key === 'find-divider') ? dividers[key] : definitions[key],
+        );
     };
 
     return (
