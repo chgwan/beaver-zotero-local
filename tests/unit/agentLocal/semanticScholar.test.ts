@@ -122,6 +122,7 @@ describe('createSemanticScholarSource', () => {
         expect(outcome.ok).toBe(false);
         if (outcome.ok) return;
         expect(outcome.error.toLowerCase()).toContain('rate limit');
+        expect(outcome.kind).toBe('rate_limit');
     });
 
     it('treats an empty data array as a successful empty result', async () => {

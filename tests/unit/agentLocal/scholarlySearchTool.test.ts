@@ -177,7 +177,7 @@ describe('createScholarlySearchTool', () => {
         expect(extractExternalSearchData(outcome.content, outcome.metadata)?.references).toEqual([]);
     });
 
-    it('fails, retryably, when every source failed', async () => {
+    it('fails, retryably, when every source failed with a transient error', async () => {
         const tool = createScholarlySearchTool({
             sources: [
                 recordingSource('OpenAlex', { ok: false, error: 'network error' }).source,
@@ -191,6 +191,56 @@ describe('createScholarlySearchTool', () => {
         if (outcome.ok) return;
         expect(outcome.error).toContain('OpenAlex: network error');
         expect(outcome.error).toContain('Semantic Scholar: HTTP 500');
+    });
+
+    it('fails, non-retryably, when every source failed for a reason only preferences can fix', async () => {
+        const tool = createScholarlySearchTool({
+            sources: [
+                recordingSource('OpenAlex', {
+                    ok: false,
+                    kind: 'budget',
+                    error: 'OpenAlex rate limit reached — the keyless daily budget may be exhausted. Add a free OpenAlex API key in Beaver preferences for a higher limit.',
+                }).source,
+                recordingSource('Semantic Scholar', {
+                    ok: false,
+                    kind: 'rate_limit',
+                    error: 'Semantic Scholar rate limit reached — the shared, keyless pool is busy. Add a free Semantic Scholar API key in Beaver preferences for a dedicated limit.',
+                }).source,
+            ],
+        });
+
+        const outcome = await tool.run({ query: 'x' }, signal());
+
+        expect(outcome).toMatchObject({ ok: false, retryable: false });
+        if (outcome.ok) return;
+        expect(outcome.error).toContain('OpenAlex');
+        expect(outcome.error).toContain('Semantic Scholar');
+        expect(outcome.error).toMatch(/preferences/i);
+    });
+
+    it('stays retryable when only some of the failures are config-fixable', async () => {
+        const tool = createScholarlySearchTool({
+            sources: [
+                recordingSource('OpenAlex', { ok: false, kind: 'auth', error: 'needs a key' }).source,
+                recordingSource('Semantic Scholar', { ok: false, kind: 'server', error: 'HTTP 500' }).source,
+            ],
+        });
+
+        const outcome = await tool.run({ query: 'x' }, signal());
+
+        expect(outcome).toMatchObject({ ok: false, retryable: true });
+    });
+
+    it('reports total_found as the true merged count, not the post-limit count', async () => {
+        const many = Array.from({ length: MAX_RESULT_LIMIT + 10 }, (_, i) =>
+            result({ id: `W${i}`, doi: `10.1/${i}`, title: `Paper ${i}` })
+        );
+        const tool = createScholarlySearchTool({ sources: [okSource('OpenAlex', many).source] });
+
+        const outcome = await runOk(tool, { query: 'x', limit: MAX_RESULT_LIMIT + 100 });
+
+        expect((outcome.content.references as unknown[]).length).toBe(MAX_RESULT_LIMIT);
+        expect(outcome.content.total_found).toBe(MAX_RESULT_LIMIT + 10);
     });
 
     it('rejects a year range that ends before it starts, without searching', async () => {

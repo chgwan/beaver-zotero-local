@@ -23,7 +23,15 @@ import type {
 import type { NativeTool, ToolExecutionResult } from '../tools/toolCatalog';
 import type { ToolArgs, ToolSpec } from '../tools/toolSchemas';
 import { DEFAULT_RESULT_LIMIT, MAX_RESULT_LIMIT, runScholarlySearch } from './scholarlySearch';
-import type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource } from './types';
+import type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource, SourceFailureKind } from './types';
+
+/**
+ * Failure kinds a retry cannot fix: the user is missing a key, a keyless
+ * daily budget is spent, or a source's own retries already gave up on a rate
+ * limit. Re-calling the tool would just burn another round for the same
+ * outcome, so these are reported as non-retryable with guidance instead.
+ */
+const NON_RETRYABLE_FAILURE_KINDS = new Set<SourceFailureKind>(['auth', 'budget', 'rate_limit']);
 
 /** Abstract length in the model's text; enough to judge relevance. */
 const TEXT_ABSTRACT_CHARS = 200;
@@ -152,16 +160,28 @@ export function createScholarlySearchTool(options: { sources: ScholarlySource[] 
                 ...(yearFrom !== undefined ? { yearFrom } : {}),
                 ...(yearTo !== undefined ? { yearTo } : {}),
             };
-            const { results, notes } = await runScholarlySearch(searchQuery, { sources, limit }, signal);
+            const { results, totalFound, notes, failureKinds } = await runScholarlySearch(
+                searchQuery,
+                { sources, limit },
+                signal
+            );
 
-            // Every source failing is a broken tool, not an empty literature.
-            if (results.length === 0 && sources.length > 0 && notes.length >= sources.length) {
-                return { ok: false, retryable: true, error: `Literature search failed. ${notes.join('; ')}` };
+            // Every source failing is a broken tool, not an empty literature. But
+            // when every failure is one only preferences can fix (a missing key, an
+            // exhausted keyless budget, or a rate limit already past its own
+            // retries), re-calling the tool cannot succeed — tell the model so it
+            // stops spending rounds on it.
+            if (results.length === 0 && sources.length > 0 && failureKinds.length >= sources.length) {
+                const retryable = !failureKinds.every((kind) => NON_RETRYABLE_FAILURE_KINDS.has(kind));
+                const error = retryable
+                    ? `Literature search failed. ${notes.join('; ')}`
+                    : `Literature search is unavailable until the user configures it: ${notes.join('; ')}`;
+                return { ok: false, retryable, error };
             }
 
             return {
                 ok: true,
-                content: { references: results.map(toReference), notes, total_found: results.length },
+                content: { references: results.map(toReference), notes, total_found: totalFound },
                 text: formatText(query, results, notes),
                 metadata: { supplemental_data: results.map(toSupplement) },
             };

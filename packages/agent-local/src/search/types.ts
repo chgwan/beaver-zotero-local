@@ -37,7 +37,18 @@ export interface ScholarlySearchQuery {
     yearTo?: number;
 }
 
-export type SourceOutcome = { ok: true; results: ScholarlyResult[] } | { ok: false; error: string };
+/**
+ * Why a source failed. Lets a caller merging failures across sources tell a
+ * problem the user can fix in preferences (`auth`, `budget`) or one that will
+ * not succeed by retrying immediately (`rate_limit`, once the source's own
+ * retries are already spent) apart from a transient problem worth retrying
+ * (`network`, `server`) or a cancelled request.
+ */
+export type SourceFailureKind = 'auth' | 'budget' | 'rate_limit' | 'network' | 'server' | 'cancelled';
+
+export type SourceOutcome =
+    | { ok: true; results: ScholarlyResult[] }
+    | { ok: false; error: string; kind?: SourceFailureKind };
 
 export interface ScholarlySource {
     name: string;

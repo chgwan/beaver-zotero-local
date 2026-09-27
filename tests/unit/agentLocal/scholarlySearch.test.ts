@@ -6,6 +6,11 @@ import {
 } from '@beaver/agent-local/search/scholarlySearch';
 import type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource, SourceOutcome } from '@beaver/agent-local/search/types';
 
+const rejecting = (name: string, reason: unknown): ScholarlySource => ({
+    name,
+    search: () => Promise.reject(reason),
+});
+
 const signal = () => new AbortController().signal;
 
 const baseQuery: ScholarlySearchQuery = { query: 'attention mechanisms', limit: 10 };
@@ -243,6 +248,31 @@ describe('runScholarlySearch', () => {
 
         const defaulted = await runScholarlySearch(baseQuery, { sources: [a] }, signal());
         expect(defaulted.results).toHaveLength(DEFAULT_RESULT_LIMIT);
+    });
+
+    it('reports totalFound as the merged count before the limit truncates it', async () => {
+        const many = Array.from({ length: 30 }, (_, i) =>
+            result({ id: `r${i}`, title: `Paper ${i}`, citationCount: i })
+        );
+        const a = sourceReturning('OpenAlex', { ok: true, results: many });
+
+        const uncapped = await runScholarlySearch(baseQuery, { sources: [a], limit: 999 }, signal());
+        expect(uncapped.results).toHaveLength(MAX_RESULT_LIMIT);
+        expect(uncapped.totalFound).toBe(30);
+
+        const defaulted = await runScholarlySearch(baseQuery, { sources: [a] }, signal());
+        expect(defaulted.results).toHaveLength(DEFAULT_RESULT_LIMIT);
+        expect(defaulted.totalFound).toBe(30);
+    });
+
+    it('carries each failed source\'s failure kind, defaulting to "server" when a source gives none', async () => {
+        const a = sourceReturning('OpenAlex', { ok: false, error: 'needs a key', kind: 'auth' });
+        const b = sourceReturning('Semantic Scholar', { ok: false, error: 'down' });
+        const c = rejecting('Third', new Error('boom'));
+
+        const outcome = await runScholarlySearch(baseQuery, { sources: [a, b, c] }, signal());
+
+        expect(outcome.failureKinds).toEqual(['auth', 'server', 'network']);
     });
 
     it('propagates the caller\'s abort signal to every source', async () => {
