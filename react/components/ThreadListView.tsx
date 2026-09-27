@@ -8,6 +8,7 @@ import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom 
 import { ThreadData } from '../atoms/threads';
 import { threadViewsAtom, threadViewKey } from '../atoms/threadList';
 import { userAtom } from '../atoms/auth';
+import { localModeEnabledAtom } from '../atoms/localMode';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import { buildThreadItemFilter } from '../utils/threadItemFilter';
@@ -32,9 +33,30 @@ interface ThreadListViewProps {
 const FOREIGN_THREAD_LABEL = 'Other Zotero profile';
 const FOREIGN_THREAD_TITLE = 'Created in a different Zotero account or profile';
 
+/**
+ * The plain empty-state label (no escape-hatch offered). Local mode has no
+ * server history to list, so an unfiltered, unsearched empty list says so
+ * instead of implying chats were expected but not found.
+ */
+export function threadListEmptyMessage({
+    activeQuery,
+    filterLabel,
+    localMode,
+}: {
+    activeQuery: string;
+    filterLabel: string | null;
+    localMode: boolean;
+}): string {
+    if (activeQuery) return 'No matching chats';
+    if (filterLabel) return `No chats about ${filterLabel}`;
+    if (localMode) return 'Chats are kept only for this session in local mode.';
+    return 'No chats yet';
+}
+
 const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) => {
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const user = useAtomValue(userAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const filter = useAtomValue(threadListFilterAtom);
     const setFilter = useSetAtom(threadListFilterAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
@@ -478,7 +500,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 {!isLoading && !hasVisibleRows && !fetchError && !canShowHidden && (
                     <div className="display-flex items-center justify-center py-6">
                         <span className="font-color-tertiary text-sm">
-                            {activeQuery ? 'No matching chats' : filter ? `No chats about ${filter.label}` : 'No chats yet'}
+                            {threadListEmptyMessage({ activeQuery, filterLabel: filter?.label ?? null, localMode })}
                         </span>
                     </div>
                 )}

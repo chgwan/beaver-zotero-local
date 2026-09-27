@@ -439,6 +439,7 @@ describe('finished-chat staged loading', () => {
         vi.clearAllMocks();
         getPrefMock.mockReturnValue(true);
         currentZoteroInstanceRefMock.mockReturnValue(CURRENT);
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, localMode: false };
     });
     const history = { runs: [], agent_actions: [], tail_run_id: null, activity: { state: 'idle', run_id: null } };
     const request = () => ({ user_id: 'u1', threadId: nextThreadId(), threadIdentity: CURRENT, canCommit: () => true });
@@ -480,6 +481,15 @@ describe('finished-chat staged loading', () => {
         expect(await store.set(loadThreadAtom, target)).toBe(true);
         expect(store.get(currentThreadIdAtom)).toBe(target.threadId);
         expect(store.get(currentMessageContentAtom)).toBe('');
+    });
+    it('commits a local-mode finished chat without a second server admission read', async () => {
+        (Zotero as any).Beaver.localMode = true;
+        const store = destination();
+        const target = request();
+        getThreadRunsMock.mockResolvedValue(history);
+        expect(await store.set(loadThreadAtom, target)).toBe(true);
+        expect(store.get(currentThreadIdAtom)).toBe(target.threadId);
+        expect(getThreadRunsMock).toHaveBeenCalledTimes(1);
     });
     it('rejects an invalidated destination while preserving newer edits', async () => {
         const store = destination();

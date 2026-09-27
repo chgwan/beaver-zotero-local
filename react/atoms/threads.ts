@@ -18,6 +18,7 @@ import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMark
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { activeAgentService } from "../runtime/localAgentService";
+import { isLocalMode } from "./localMode";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
@@ -682,7 +683,10 @@ export const loadThreadAtom = atom(
                     set(currentThreadNameAtom, fetchedName);
                 }
             }
-            if (canCommit) {
+            // Finished-chat navigation (`canCommit`) is only reachable from
+            // "Open in Beaver window", which is hidden in local mode — there
+            // is no server admission state to reconcile against there.
+            if (canCommit && !isLocalMode()) {
                 const latest = await readAdmission(threadId);
                 if (!isCurrent() || latest.activity.state !== 'idle' || latest.tailRunId !== tailRunId) return false;
             }
