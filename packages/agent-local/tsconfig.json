@@ -31,6 +31,9 @@
     "./src/globals.d.ts",
     "./src/version.ts",
     "./src/config/localAgentConfig.ts",
+    "./src/tools/argValidation.ts",
+    "./src/tools/toolSchemas.ts",
+    "./src/tools/toolCatalog.ts",
     "./src/index.ts"
   ]
 }
