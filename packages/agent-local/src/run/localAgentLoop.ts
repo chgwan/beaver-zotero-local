@@ -15,6 +15,12 @@
  *  - A failing tool is not a failing run. Unparseable arguments and handler
  *    errors go back to the model as failed tool returns so it can correct
  *    itself; a call whose arguments did not parse is never executed.
+ *  - A turn the provider paused (a long hosted web search) is sent again with
+ *    its partial content appended, and continues at the same coordinates. It
+ *    stays one round: continuations do not count against the round cap, and
+ *    are bounded by `MAX_PAUSE_CONTINUATIONS` instead.
+ *  - Sources cited by hosted web search are appended to the round's text as a
+ *    markdown list, at the text's own coordinate.
  *  - A cancelled run ends silently: the caller that aborted the signal owns
  *    reporting it. A provider failure ends the run with an error and no
  *    completion frames.
@@ -25,7 +31,16 @@ import type { WSCallbacks, WSReadyData } from '@beaver/agent-core/protocol/agent
 import { ProcessingMode, SubscriptionStatus } from '@beaver/agent-core/types/profile';
 import type { LocalAgentConfig } from '../config/localAgentConfig';
 import type { AccumulatedToolCall } from '../llm/toolCallAccumulator';
-import { LlmRequestError, type LlmClient, type LlmMessage, type LlmTurnResult, type LlmUsage } from '../llm/types';
+import {
+    LlmRequestError,
+    addCitation,
+    type LlmCitation,
+    type LlmClient,
+    type LlmMessage,
+    type LlmTurnResult,
+    type LlmUsage,
+    type LlmWebSearchOptions,
+} from '../llm/types';
 import type { LocalToolCatalog } from '../tools/toolCatalog';
 import { fitTranscript, tokensForChars, transcriptBudget } from './contextBudget';
 import { FrameEmitter, type RoundFrames } from './frameEmitter';
@@ -55,7 +70,12 @@ export interface LocalAgentLoopOptions {
     signal: AbortSignal;
     /** Replaces the built-in system prompt. */
     systemPrompt?: string;
+    /** Provider-hosted web search, passed to every provider request of the run. */
+    webSearch?: LlmWebSearchOptions;
 }
+
+/** Times one round may continue a paused turn before settling for what it has. */
+export const MAX_PAUSE_CONTINUATIONS = 4;
 
 /**
  * Session data for `onReady`. A local run has no subscription, is processed
@@ -120,6 +140,28 @@ class UsageTally {
     }
 }
 
+/** Escape the characters that would end a markdown link label early. */
+const escapeLinkLabel = (label: string): string => label.replace(/([\\[\]])/g, '\\$1').replace(/\s+/g, ' ');
+
+/** A markdown "Sources" list for cited URLs, or '' when there are none. */
+export function formatSources(citations: readonly LlmCitation[]): string {
+    if (citations.length === 0) return '';
+    const lines = citations.map((citation) => `- [${escapeLinkLabel(citation.title)}](${citation.url.replace(/\)/g, '%29')})`);
+    return `\n\nSources:\n${lines.join('\n')}`;
+}
+
+/** One round's result. */
+interface RoundResult {
+    /** The whole round as rendered: text and reasoning across continuations, with sources. */
+    turn: LlmTurnResult;
+    /**
+     * The round's transcript entries, oldest first: one assistant message per
+     * paused request, then the last request's message, whose content carries
+     * the sources list. Only needed when the round called tools.
+     */
+    messages: LlmMessage[];
+}
+
 /**
  * Stream one assistant turn into `frames`, then emit its tool calls.
  *
@@ -128,13 +170,17 @@ class UsageTally {
  * written to the same coordinate if it differs from the last streamed value
  * (or claims one if nothing streamed) — a provider that also returns an
  * aggregated message never produces a second copy.
+ *
+ * A paused turn is continued in place: the next request's text and reasoning
+ * are written after what the paused one produced, at the same coordinates.
  */
 async function streamRound(
     frames: RoundFrames,
     options: LocalAgentLoopOptions,
     transcript: LlmMessage[],
-    allowTools: boolean
-): Promise<LlmTurnResult> {
+    allowTools: boolean,
+    hooks: { onRequest(usage: LlmUsage | null): void; onWarning(message: string): void }
+): Promise<RoundResult> {
     const { client, config, catalog, signal } = options;
     let nextPartIndex = 0;
     let thinkingIndex: number | null = null;
@@ -153,26 +199,56 @@ async function streamRound(
         frames.text(textIndex, content);
     };
 
-    const turn = await client.streamTurn(
-        {
-            model: config.model,
-            messages: transcript,
-            tools: catalog.definitions(),
-            ...(allowTools ? {} : { toolChoice: 'none' as const }),
-        },
-        {
-            onThinkingDelta: (fullText) => {
-                if (fullText) writeThinking(fullText);
+    const paused: LlmMessage[] = [];
+    const citations: LlmCitation[] = [];
+    let textBefore = '';
+    let thinkingBefore = '';
+    let turn: LlmTurnResult;
+    for (let continuation = 0; ; continuation++) {
+        turn = await client.streamTurn(
+            {
+                model: config.model,
+                messages: [...transcript, ...paused],
+                tools: catalog.definitions(),
+                ...(allowTools ? {} : { toolChoice: 'none' as const }),
+                ...(options.webSearch ? { webSearch: options.webSearch } : {}),
             },
-            onTextDelta: (fullText) => {
-                if (fullText) writeText(fullText);
+            {
+                onThinkingDelta: (fullText) => {
+                    if (fullText) writeThinking(thinkingBefore + fullText);
+                },
+                onTextDelta: (fullText) => {
+                    if (fullText) writeText(textBefore + fullText);
+                },
+                onWarning: hooks.onWarning,
             },
-        },
-        signal
-    );
+            signal
+        );
+        hooks.onRequest(turn.usage);
+        for (const citation of turn.citations ?? []) addCitation(citations, citation.url, citation.title);
 
-    if (turn.thinking && turn.thinking !== lastThinking) writeThinking(turn.thinking);
-    if (turn.text && turn.text !== lastText) writeText(turn.text);
+        if (turn.finishReason !== 'pause') break;
+        if (continuation >= MAX_PAUSE_CONTINUATIONS) {
+            hooks.onWarning(
+                'The provider paused its web search too many times; showing the answer so far. ' +
+                    'Send a follow-up to continue.'
+            );
+            break;
+        }
+        paused.push({
+            role: 'assistant',
+            content: turn.text,
+            ...(turn.providerBlocks ? { providerBlocks: turn.providerBlocks } : {}),
+        });
+        textBefore += turn.text;
+        thinkingBefore += turn.thinking;
+    }
+
+    const sources = formatSources(citations);
+    const text = textBefore + turn.text + sources;
+    const thinking = thinkingBefore + turn.thinking;
+    if (thinking && thinking !== lastThinking) writeThinking(thinking);
+    if (text && text !== lastText) writeText(text);
 
     for (const call of turn.toolCalls) {
         frames.toolCall(nextPartIndex++, {
@@ -182,7 +258,17 @@ async function streamRound(
         });
     }
     frames.sealParts();
-    return turn;
+
+    const last: LlmMessage = {
+        role: 'assistant',
+        content: turn.text + sources,
+        toolCalls: turn.toolCalls,
+        ...(turn.providerBlocks ? { providerBlocks: turn.providerBlocks } : {}),
+    };
+    return {
+        turn: { ...turn, text, thinking, ...(citations.length > 0 ? { citations } : {}) },
+        messages: [...paused, last],
+    };
 }
 
 async function runToolCall(call: AccumulatedToolCall, catalog: LocalToolCatalog, signal: AbortSignal): Promise<ToolCallOutcome> {
@@ -251,8 +337,10 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             // The last allowed round forbids tool calls: results from it
             // could never reach the model, so it has to answer instead.
             const lastRound = round === config.maxRounds - 1;
-            const turn = await streamRound(frames, options, transcript, !lastRound);
-            usage.addRequest(turn.usage);
+            const { turn, messages } = await streamRound(frames, options, transcript, !lastRound, {
+                onRequest: (requestUsage) => usage.addRequest(requestUsage),
+                onWarning: (message) => emitter.warning({ type: 'local_web_search', message }),
+            });
 
             if (turn.toolCalls.length === 0) {
                 await emitter.finish(usage.toRunUsage());
@@ -262,7 +350,7 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             // The renderer must hold each tool call before its return arrives.
             await emitter.flush();
 
-            transcript.push({ role: 'assistant', content: turn.text, toolCalls: turn.toolCalls });
+            transcript.push(...messages);
 
             for (const call of turn.toolCalls) {
                 // A provider that ignores the last round's tool_choice still
