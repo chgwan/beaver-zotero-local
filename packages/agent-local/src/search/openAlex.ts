@@ -156,6 +156,9 @@ export function createOpenAlexSource(options: { apiKey?: string } = {}): Scholar
                 if (result.status === 429) {
                     return {
                         ok: false,
+                        // Keyless: this is the shared daily budget, not a transient
+                        // rate limit — retrying immediately cannot help.
+                        kind: apiKey ? 'rate_limit' : 'budget',
                         error: apiKey
                             ? 'OpenAlex rate limit reached. Try again shortly.'
                             : 'OpenAlex rate limit reached — the keyless daily budget may be exhausted. Add a free OpenAlex API key in Beaver preferences for a higher limit.',
@@ -167,16 +170,22 @@ export function createOpenAlexSource(options: { apiKey?: string } = {}): Scholar
                 if ((result.status === 401 || result.status === 403) && !apiKey) {
                     return {
                         ok: false,
+                        kind: 'auth',
                         error: 'OpenAlex now requires an API key for this request. Add a free OpenAlex API key in Beaver preferences to search OpenAlex.',
                     };
                 }
                 if ((result.status === 401 || result.status === 403) && apiKey) {
                     return {
                         ok: false,
+                        kind: 'auth',
                         error: 'OpenAlex rejected the configured API key. Check the key in Beaver preferences.',
                     };
                 }
-                return { ok: false, error: `OpenAlex request failed: ${result.error}` };
+                return {
+                    ok: false,
+                    kind: result.status === null ? (result.error === 'Cancelled.' ? 'cancelled' : 'network') : 'server',
+                    error: `OpenAlex request failed: ${result.error}`,
+                };
             }
 
             const works = result.data.results ?? [];

@@ -140,12 +140,20 @@ export function createSemanticScholarSource(options: { apiKey?: string } = {}): 
                 if (result.status === 429) {
                     return {
                         ok: false,
+                        // S2's keyless pool has no daily budget to exhaust like
+                        // OpenAlex's — it is a rate limit that a later retry (not
+                        // this round) can clear once the shared pool frees up.
+                        kind: 'rate_limit',
                         error: apiKey
                             ? 'Semantic Scholar rate limit reached. Try again shortly.'
                             : 'Semantic Scholar rate limit reached — the shared, keyless pool is busy. Add a free Semantic Scholar API key in Beaver preferences for a dedicated limit.',
                     };
                 }
-                return { ok: false, error: `Semantic Scholar request failed: ${result.error}` };
+                return {
+                    ok: false,
+                    kind: result.status === null ? (result.error === 'Cancelled.' ? 'cancelled' : 'network') : 'server',
+                    error: `Semantic Scholar request failed: ${result.error}`,
+                };
             }
 
             const papers = result.data.data ?? [];

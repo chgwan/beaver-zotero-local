@@ -148,6 +148,8 @@ describe('createOpenAlexSource', () => {
 
         const outcome = await createOpenAlexSource().search({ query: 'x', limit: 5 }, signal());
         expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.kind).toBe('server');
     });
 
     it('names the keyless daily budget on a 429 with no API key configured', async () => {
@@ -159,6 +161,20 @@ describe('createOpenAlexSource', () => {
         if (outcome.ok) return;
         expect(outcome.error.toLowerCase()).toContain('daily budget');
         expect(outcome.error.toLowerCase()).toContain('api key');
+        expect(outcome.kind).toBe('budget');
+    });
+
+    it('reports a keyed 429 as a rate limit, not a budget, since a key removes the daily cap', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(429, {})));
+        const { createOpenAlexSource } = await loadModule();
+
+        const outcome = await createOpenAlexSource({ apiKey: 'secret-key' }).search(
+            { query: 'x', limit: 5 },
+            signal()
+        );
+        expect(outcome.ok).toBe(false);
+        if (outcome.ok) return;
+        expect(outcome.kind).toBe('rate_limit');
     });
 
     it.each([401, 403])(
@@ -171,6 +187,7 @@ describe('createOpenAlexSource', () => {
             expect(outcome.ok).toBe(false);
             if (outcome.ok) return;
             expect(outcome.error.toLowerCase()).toContain('api key');
+            expect(outcome.kind).toBe('auth');
         }
     );
 
@@ -186,6 +203,7 @@ describe('createOpenAlexSource', () => {
         if (outcome.ok) return;
         expect(outcome.error.toLowerCase()).toContain('key');
         expect(outcome.error.toLowerCase()).not.toContain('add a free');
+        expect(outcome.kind).toBe('auth');
     });
 
     it('skips a malformed work instead of failing the whole search', async () => {

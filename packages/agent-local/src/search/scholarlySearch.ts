@@ -1,5 +1,11 @@
+/**
+ * Fans out a query to every configured scholarly source and reconciles their
+ * answers into one ranked, deduplicated list, tolerating a source that fails
+ * or is not configured.
+ */
+
 import { normalizeDoi } from './types';
-import type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource } from './types';
+import type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource, SourceFailureKind } from './types';
 
 /** How many merged, ranked results a caller gets back absent an explicit `limit`. */
 export const DEFAULT_RESULT_LIMIT = 10;
@@ -15,7 +21,11 @@ export interface ScholarlySearchOptions {
 
 export interface ScholarlySearchOutcome {
     results: ScholarlyResult[];
+    /** Distinct works found across every source before the result limit truncated them. */
+    totalFound: number;
     notes: string[];
+    /** One entry per failed source, parallel to the failure notes in `notes`. */
+    failureKinds: SourceFailureKind[];
 }
 
 function describeError(error: unknown): string {
@@ -36,7 +46,7 @@ function normalizeTitle(title: string): string {
  * field, rather than picking one record wholesale — a source with the
  * richer abstract is not necessarily the one with the best citation count,
  * OA link, or venue, and discarding the loser's better fields would silently
- * degrade the card Task 5 renders from these results.
+ * degrade the external-reference card rendered from these results.
  *
  * `source`/`id`/`url` are the one exception: they identify *which* record a
  * link resolves to, so they travel together and always come from `base` —
@@ -93,16 +103,19 @@ export async function runScholarlySearch(
     const settled = await Promise.allSettled(options.sources.map((source) => source.search(query, signal)));
 
     const notes: string[] = [];
+    const failureKinds: SourceFailureKind[] = [];
     const collected: ScholarlyResult[] = [];
 
     settled.forEach((outcome, index) => {
         const source = options.sources[index];
         if (outcome.status === 'rejected') {
             notes.push(`${source.name}: ${describeError(outcome.reason)}`);
+            failureKinds.push('network');
             return;
         }
         if (!outcome.value.ok) {
             notes.push(`${source.name}: ${outcome.value.error}`);
+            failureKinds.push(outcome.value.kind ?? 'server');
             return;
         }
         collected.push(...outcome.value.results);
@@ -145,5 +158,5 @@ export async function runScholarlySearch(
     const limit = Math.max(1, Math.min(requestedLimit, MAX_RESULT_LIMIT));
     const results = merged.slice(0, limit).map((result, index) => ({ ...result, rank: index + 1 }));
 
-    return { results, notes };
+    return { results, totalFound: merged.length, notes, failureKinds };
 }
