@@ -70,3 +70,6 @@ docs-zotero
 
 # Opaque native helper release assets
 /addon/content/voice/
+
+# Local planning documents
+/docs/superpowers/
