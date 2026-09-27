@@ -74,11 +74,17 @@ declare interface ResponseBody {
     getReader(): StreamReader;
 }
 
+/** Response headers the provider clients and search sources read (e.g. Retry-After). */
+declare interface ResponseHeaders {
+    get(name: string): string | null;
+}
+
 /** The response members the provider clients read. */
 declare interface Response {
     readonly ok: boolean;
     readonly status: number;
     readonly statusText: string;
+    readonly headers: ResponseHeaders;
     readonly body: ResponseBody | null;
     text(): Promise<string>;
     json(): Promise<any>;
@@ -92,6 +98,9 @@ declare interface RequestInit {
 }
 
 declare function fetch(url: string, init?: RequestInit): Promise<Response>;
+
+/** Monotonic elapsed time, used to space host requests; unaffected by wall-clock changes mid-run. */
+declare const performance: { now(): number };
 
 /**
  * Incremental UTF-8 decoding of streamed bytes. `stream: true` keeps partial

@@ -47,6 +47,7 @@
     "./src/run/userPrompt.ts",
     "./src/run/localAgentLoop.ts",
     "./src/run/runHistory.ts",
+    "./src/search/httpJson.ts",
     "./src/index.ts"
   ]
 }
