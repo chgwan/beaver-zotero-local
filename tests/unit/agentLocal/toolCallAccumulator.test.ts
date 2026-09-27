@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ToolCallAccumulator } from '@beaver/agent-local/llm/toolCallAccumulator';
+import { ToolCallAccumulator, wireArguments } from '@beaver/agent-local/llm/toolCallAccumulator';
 
 describe('ToolCallAccumulator', () => {
     it('reassembles arguments split mid-token across fragments', () => {
@@ -70,6 +70,15 @@ describe('ToolCallAccumulator', () => {
         expect(call.name).toBe('late_name');
     });
 
+    it('fills the name and id from a seed only while they are blank', () => {
+        const acc = new ToolCallAccumulator();
+        acc.open(0, { id: 'a', name: 'zotero_search' });
+        acc.open(0, { id: 'b', name: 'zotero_search' });
+        const [call] = acc.close();
+        expect(call.name).toBe('zotero_search');
+        expect(call.id).toBe('a');
+    });
+
     it('accumulates a name delivered in fragments', () => {
         const acc = new ToolCallAccumulator();
         acc.open(0, {});
@@ -96,5 +105,28 @@ describe('ToolCallAccumulator', () => {
         acc.open('block_2', { name: 'second' });
         acc.open('block_1', { name: 'first' });
         expect(acc.close().map((c) => c.name)).toEqual(['second', 'first']);
+    });
+
+    describe('wireArguments', () => {
+        const call = (rawArgs: string, parseError: string | null, args: Record<string, unknown> = {}) => ({
+            id: 'c',
+            name: 't',
+            args,
+            rawArgs,
+            parseError,
+        });
+
+        it('sends back exactly what the provider streamed when it parsed', () => {
+            expect(wireArguments(call('{"q": "x"}', null, { q: 'x' }))).toBe('{"q": "x"}');
+        });
+
+        it('sends an empty object for a call with no arguments', () => {
+            expect(wireArguments(call('', null))).toBe('{}');
+        });
+
+        it('sends the parsed arguments, never the malformed text, for a call that failed to parse', () => {
+            expect(wireArguments(call('{"q": "unterminated', 'bad json'))).toBe('{}');
+            expect(wireArguments(call('[1]', 'not an object'))).toBe('{}');
+        });
     });
 });
