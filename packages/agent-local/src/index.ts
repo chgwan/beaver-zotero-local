@@ -15,3 +15,14 @@ export type {
     LocalConfigError,
     SupportedFormat,
 } from './config/localAgentConfig';
+export { buildToolCatalog, READ_ONLY_TOOLS } from './tools/toolCatalog';
+export type {
+    AgentDataProviderLike,
+    JsonSchema,
+    LocalToolCatalog,
+    LocalToolDefinition,
+    ToolArgs,
+    ToolCatalogOptions,
+    ToolExecutionResult,
+    ToolRequest,
+} from './tools/toolCatalog';
