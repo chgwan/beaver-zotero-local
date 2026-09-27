@@ -1,9 +1,12 @@
 import React, { useState } from "react";
 import { useAtomValue } from "jotai";
+import IconButton from "@beaver/agent-ui/primitives/IconButton";
+import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import SignInForm from "../auth/SignInForm";
-import { Icon, LockIcon } from "../icons/icons";
+import { Icon, LockIcon, SettingsIcon } from "../icons/icons";
 import { getPref } from "../../../src/utils/prefs";
 import { loginStepAtom } from "../../atoms/auth";
+import { openPreferencesWindow } from "../../ui/openPreferencesWindow";
 
 interface LoginPageProps {
     emailInputRef?: React.RefObject<HTMLInputElement>;
@@ -16,10 +19,20 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
     const loginStep = useAtomValue(loginStepAtom)
 
     return (
-        <div 
+        <div
             id="login-page"
             className="display-flex flex-col flex-1 min-h-0 overflow-y-auto scrollbar min-w-0 py-4 px-4"
         >
+            <div className="display-flex flex-row justify-end">
+                <Tooltip content="Settings — enable Local Mode to use Beaver without an account" showArrow>
+                    <IconButton
+                        variant="ghost"
+                        icon={SettingsIcon}
+                        ariaLabel="Settings"
+                        onClick={() => openPreferencesWindow('models')}
+                    />
+                </Tooltip>
+            </div>
             <div style={{ height: '1rem' }}></div>
             <div className="webapp-max-w-md webapp-mx-auto w-full">
                 {/* Header section */}

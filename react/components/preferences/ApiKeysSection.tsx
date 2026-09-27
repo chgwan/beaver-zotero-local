@@ -10,6 +10,10 @@ import { handlePrefSave } from "./utils";
 import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
 import { remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { refreshCustomModelsAtom } from "../../atoms/models";
+import { localModeEnabledAtom } from "../../atoms/localMode";
+import { localModeStatusAtom } from "../../atoms/localAgentConfig";
+import { usePreference } from "../../hooks/usePreference";
+import { needsLocalModeRestart, parseLocalMaxRoundsInput } from "./localModeSettings";
 import {
     CustomChatModel,
     getCustomChatModelsForEditing,
@@ -39,6 +43,32 @@ const emptyCustomModel = (): CustomChatModel => ({
 const ApiKeysSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const refreshCustomModels = useSetAtom(refreshCustomModelsAtom);
+
+    // --- Local Mode ---
+    // `localModeActive` reflects the running process (fixed at startup); the
+    // `localMode` pref can be flipped live, so the two can disagree until a
+    // restart applies the new value.
+    const localModeActive = useAtomValue(localModeEnabledAtom);
+    const localStatus = useAtomValue(localModeStatusAtom);
+    const [localModePref, setLocalModePref] = usePreference(() => getPref('localMode'));
+    const [maxRoundsText, setMaxRoundsText] = useState<string>(() => {
+        const stored = getPref('localMaxRounds');
+        return stored > 0 ? String(stored) : '';
+    });
+    const restartNeeded = needsLocalModeRestart(localModePref, localModeActive);
+
+    const handleLocalModeToggle = useCallback((checked: boolean) => {
+        setPref('localMode', checked);
+        setLocalModePref(checked);
+    }, [setLocalModePref]);
+
+    const handleMaxRoundsChange = useCallback((text: string) => {
+        setMaxRoundsText(text);
+        const parsed = parseLocalMaxRoundsInput(text);
+        if (parsed !== null) {
+            setPref('localMaxRounds', parsed);
+        }
+    }, []);
 
     // --- Atoms: API Keys ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
@@ -125,13 +155,78 @@ const ApiKeysSection: React.FC = () => {
 
     return (
         <>
+            {/* Local Mode */}
+            <SectionLabel>Local Mode</SectionLabel>
+            <SettingsGroup className="bg-senary">
+                <SettingsRow
+                    title="Run entirely on this device"
+                    description={
+                        restartNeeded
+                            ? "Connect a custom provider directly, without a Beaver account. Restart Zotero to apply this change."
+                            : "Connect a custom provider directly, without a Beaver account."
+                    }
+                    announceDescription={restartNeeded}
+                    control={
+                        <input
+                            type="checkbox"
+                            aria-label="Run entirely on this device"
+                            checked={localModePref}
+                            onChange={(e) => handleLocalModeToggle(e.target.checked)}
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    }
+                />
+                <SettingsRow
+                    hasBorder
+                    title="Round cap"
+                    description="Limit how many tool-calling rounds a single run can take before it stops. Leave blank for the default (20)."
+                    control={
+                        <input
+                            type="text"
+                            inputMode="numeric"
+                            value={maxRoundsText}
+                            onChange={(e) => handleMaxRoundsChange(e.target.value)}
+                            placeholder="20"
+                            aria-label="Maximum tool-calling rounds"
+                            className="chat-input text-base font-color-primary"
+                            style={{ width: '80px', textAlign: 'right' }}
+                        />
+                    }
+                />
+                {localModeActive && (
+                    <SettingsRow
+                        hasBorder
+                        className="items-start"
+                        announceDescription
+                        title="Status"
+                        description={
+                            <span className={localStatus.ok ? 'font-color-green' : 'font-color-error'}>
+                                {localStatus.ok
+                                    ? `Ready — using “${localStatus.config.model.name}”.`
+                                    : localStatus.message}
+                            </span>
+                        }
+                    />
+                )}
+            </SettingsGroup>
+
             <SectionDescription>
-                Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
-                or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).
-                <DocLink path="api-key#why-beaver-needs-more-from-your-api-key"> Why?</DocLink>
+                {localModeActive ? (
+                    <>
+                        Connect your own local or self-hosted model below. Requests go straight from
+                        this device to your endpoint — Beaver's backend is not involved.
+                    </>
+                ) : (
+                    <>
+                        Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
+                        or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).
+                        <DocLink path="api-key#why-beaver-needs-more-from-your-api-key"> Why?</DocLink>
+                    </>
+                )}
             </SectionDescription>
 
             {/* API Keys */}
+            {!localModeActive && (
             <SettingsGroup className="bg-senary">
                 <div style={{ padding: '8px 12px' }}>
                     <ApiKeyInput
@@ -170,6 +265,7 @@ const ApiKeysSection: React.FC = () => {
                     />
                 </div>
             </SettingsGroup>
+            )}
 
             {/* Custom Providers */}
             <div>
@@ -187,9 +283,18 @@ const ApiKeysSection: React.FC = () => {
                 </div>
 
                 <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                    OpenRouter, OpenAI-compatible proxies, or self-hosted HTTPS endpoints.
-                    Requests are routed through Beaver's server. Each endpoint must be reachable from the public
-                    internet over HTTPS.
+                    {localModeActive ? (
+                        <>
+                            OpenRouter, OpenAI-compatible proxies, or a local server such as Ollama or
+                            LM Studio. Requests go straight from this device to the endpoint.
+                        </>
+                    ) : (
+                        <>
+                            OpenRouter, OpenAI-compatible proxies, or self-hosted HTTPS endpoints.
+                            Requests are routed through Beaver's server. Each endpoint must be reachable from the public
+                            internet over HTTPS.
+                        </>
+                    )}
                     {' '}<DocLink path="custom-models">Learn more</DocLink>
                 </div>
 
@@ -231,6 +336,8 @@ const ApiKeysSection: React.FC = () => {
             </div>
 
             {/* Plus Tools */}
+            {!localModeActive && (
+            <>
             <div className="display-flex flex-row gap-2">
                 <SectionLabel>Plus Tools</SectionLabel>
                 {requestPlusTools ? (
@@ -361,6 +468,8 @@ const ApiKeysSection: React.FC = () => {
                     />
                 )}
             </SettingsGroup>
+            </>
+            )}
 
         </>
     );
