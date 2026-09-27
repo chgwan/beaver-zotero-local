@@ -91,14 +91,13 @@ const isExcludedLibrary = (value: unknown): value is ExcludedLibrary => {
 /**
  * Read the local-mode exclusion list from the `localExcludedLibraries` pref.
  *
- * An unreadable value must not stop the plugin from starting, so a pref that is
- * not a JSON array counts as an empty list and malformed entries are skipped.
- * That means every library the entry would have covered stays searchable, so
- * each case is reported through `Zotero.logError` for the user to see in the
- * error console. The preferences UI only ever writes well-formed lists; this
- * path is reached by editing the pref by hand.
+ * Returns `null` when the value cannot be trusted: not JSON, not an array, or
+ * any entry that is not a well-formed exclusion. The exclusion list is an
+ * access-control boundary, so the caller then treats every library as
+ * excluded rather than guessing which ones the user meant. The problem is
+ * reported through `Zotero.logError`; it never throws, so startup continues.
  */
-function readLocalExcludedLibraries(): ExcludedLibrary[] {
+function readLocalExcludedLibraries(): ExcludedLibrary[] | null {
     const raw = getPref("localExcludedLibraries");
     if (raw === undefined || raw === "") return [];
     let parsed: unknown;
@@ -107,23 +106,15 @@ function readLocalExcludedLibraries(): ExcludedLibrary[] {
     } catch {
         parsed = undefined;
     }
-    if (!Array.isArray(parsed)) {
+    if (!Array.isArray(parsed) || !parsed.every(isExcludedLibrary)) {
         Zotero.logError(
             new Error(
-                "Beaver: the localExcludedLibraries preference is not a JSON array; no libraries are excluded in local mode.",
+                "Beaver: the localExcludedLibraries preference is invalid; no libraries are searchable in local mode until it is fixed.",
             ),
         );
-        return [];
+        return null;
     }
-    const entries = parsed.filter(isExcludedLibrary);
-    if (entries.length !== parsed.length) {
-        Zotero.logError(
-            new Error(
-                "Beaver: skipped malformed entries in the localExcludedLibraries preference.",
-            ),
-        );
-    }
-    return entries.map((entry) =>
+    return parsed.map((entry) =>
         entry.type === "group"
             ? { type: "group", group_id: entry.group_id }
             : { type: "user" },
@@ -222,6 +213,8 @@ export class InstanceAccount {
     readonly auth: SupabaseClient["auth"];
     readonly client: SupabaseClient;
     private readonly localMode: boolean;
+    /** Local-mode exclusions, read once at start; `null` means invalid, so nothing is searchable. */
+    private localExclusions: ExcludedLibrary[] | null = null;
 
     constructor(
         private sdk: SupabaseClient = supabase,
@@ -345,6 +338,7 @@ export class InstanceAccount {
      */
     private startLocal(): void {
         if (this.disposed || this.snapshot.initialized) return;
+        this.localExclusions = readLocalExcludedLibraries();
         this.snapshot.initialized = true;
         this.snapshot.session = null;
         this.snapshot.data = null;
@@ -399,10 +393,14 @@ export class InstanceAccount {
         const previousSearchAccess = beaver.hasSearchIndexAccess;
         const excluded = new Set(
             (this.localMode
-                ? readLocalExcludedLibraries()
+                ? (this.localExclusions ?? [])
                 : (profile?.excluded_libraries ?? [])
             ).map(excludedLibraryKey),
         );
+        // An invalid local exclusion list fails closed: the scope stays
+        // initialized, so handlers answer "not searchable" instead of waiting,
+        // but no library is searchable.
+        const localScopeUntrusted = this.localMode && !this.localExclusions;
         // Local mode has a scope without a session; otherwise scope requires
         // the signed-in account whose profile supplied it.
         const scopeReady =
@@ -414,7 +412,7 @@ export class InstanceAccount {
             beaver.hasOcrAccess,
             beaver.hasSearchIndexAccess,
         ]);
-        beaver.searchableLibraryIds = scopeReady
+        beaver.searchableLibraryIds = scopeReady && !localScopeUntrusted
             ? this.snapshot.libraries
                   .filter(
                       (lib) =>

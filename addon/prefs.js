@@ -208,5 +208,6 @@ pref("localMode", false);
 pref("localMaxRounds", 0);
 // Libraries local mode keeps away from the model: a JSON array in the same
 // shape as the account's excluded libraries, e.g. [{"type":"group","group_id":1}].
-// Read whenever local mode publishes its library scope.
+// Read once at plugin startup in local mode, so a change applies on the next
+// plugin reload. An invalid value makes no library searchable.
 pref("localExcludedLibraries", "[]");
