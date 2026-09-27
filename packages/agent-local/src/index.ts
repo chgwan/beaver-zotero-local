@@ -26,3 +26,7 @@ export type {
     ToolExecutionResult,
     ToolRequest,
 } from './tools/toolCatalog';
+export { readSseEvents } from './llm/sseReader';
+export type { SseEvent } from './llm/sseReader';
+export { ToolCallAccumulator } from './llm/toolCallAccumulator';
+export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
