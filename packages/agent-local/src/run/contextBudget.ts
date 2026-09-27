@@ -40,11 +40,11 @@ export const tokensForChars = (chars: number): number => Math.ceil(chars / CHARS
 const transcriptChars = (messages: readonly LlmMessage[]): number => {
     let chars = 0;
     for (const message of messages) {
-        // Raw provider blocks can hold whole search results or encrypted
-        // reasoning. Some clients send them in place of the text and calls,
-        // others alongside them, so both are counted.
+        // A turn replayed from raw provider blocks is sent as those blocks,
+        // which can hold whole search results.
         if (message.providerBlocks?.length) {
             chars += JSON.stringify(message.providerBlocks).length;
+            continue;
         }
         chars += message.content.length;
         for (const call of message.toolCalls ?? []) chars += call.name.length + call.rawArgs.length;

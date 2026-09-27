@@ -18,12 +18,11 @@ export interface LlmMessage {
     /** Present on a tool result, naming the call it answers. */
     toolCallId?: string;
     /**
-     * Provider content from an assistant turn that must be sent back
-     * unchanged (hosted search calls, their encrypted results, cited text,
-     * encrypted reasoning). The client that produced it decides how: the
-     * Anthropic client replays these blocks instead of `content` and
-     * `toolCalls`; the OpenAI Responses client sends them (reasoning items)
-     * ahead of both. Other clients ignore them.
+     * An assistant turn exactly as the provider returned it, for a provider
+     * that requires server-side content (hosted search calls, their encrypted
+     * results, cited text, encrypted reasoning) to be sent back unchanged.
+     * When present, a client that understands it replays these blocks, in
+     * order, instead of `content` and `toolCalls`; other clients ignore it.
      */
     providerBlocks?: unknown[];
 }

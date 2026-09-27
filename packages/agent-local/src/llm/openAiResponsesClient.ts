@@ -38,9 +38,10 @@
  *   {item_id, output_index, delta} streams its arguments. They are reassembled
  *   per item by `ToolCallAccumulator` and parsed once, at close.
  * - `response.output_item.done` {output_index, item} carries each finished
- *   item: a `web_search_call` (never a tool call), a `reasoning` item whose
- *   `encrypted_content` must be sent back for stateless multi-turn use, or a
- *   `message` whose `output_text` parts hold `url_citation` annotations.
+ *   item: a `web_search_call` (never a tool call), a `reasoning` item with
+ *   the `encrypted_content` that stateless multi-turn use needs, a
+ *   `function_call`, or a `message` whose `output_text` parts hold
+ *   `url_citation` annotations.
  * - `response.output_text.annotation.added` {annotation} carries a citation
  *   as it streams: `{type:'url_citation', url, title, start_index, end_index}`.
  * - `response.completed` / `response.incomplete` {response} end the stream
@@ -54,7 +55,7 @@
  */
 
 import { readSseEvents } from './sseReader';
-import { ToolCallAccumulator, wireArguments } from './toolCallAccumulator';
+import { ToolCallAccumulator, wireArguments, type AccumulatedToolCall } from './toolCallAccumulator';
 import {
     LlmRequestError,
     addCitation,
@@ -84,12 +85,13 @@ const isAbortError = (error: unknown): boolean => error instanceof Error && erro
 /**
  * Translate the transcript into `instructions` and `input` items.
  *
- * An assistant message's `providerBlocks` hold the reasoning items that turn
- * produced; they are sent ahead of its text and calls, which the reasoning
- * guide asks for when replaying a turn that called functions. Hosted search
- * calls are not replayed: the model's answer already contains what it took
- * from them, and items from a response that was not stored cannot be
- * referenced again.
+ * An assistant turn this client produced carries its output items in
+ * `providerBlocks`: reasoning, hosted search calls, messages and function
+ * calls, in the order the response returned them. Because responses are not
+ * stored, the API can only connect a reasoning item to what followed it if
+ * every item comes back inline, unchanged and in order, so those items are
+ * sent in place of the turn's text and calls. Turns without them (history
+ * from earlier runs) are translated from their text and calls.
  */
 export function buildResponsesInput(messages: LlmMessage[]): { instructions: string | null; input: unknown[] } {
     const system: string[] = [];
@@ -105,7 +107,10 @@ export function buildResponsesInput(messages: LlmMessage[]): { instructions: str
             continue;
         }
         if (message.role === 'assistant') {
-            for (const block of message.providerBlocks ?? []) input.push(block);
+            if (message.providerBlocks?.length) {
+                input.push(...message.providerBlocks);
+                continue;
+            }
             if (message.content.length > 0) input.push({ role: 'assistant', content: message.content });
             for (const call of message.toolCalls ?? []) {
                 input.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: wireArguments(call) });
@@ -139,6 +144,50 @@ const readCitation = (annotation: any, citations: LlmCitation[]): void => {
     if (annotation?.type !== 'url_citation') return;
     addCitation(citations, annotation.url, annotation.title);
 };
+
+/**
+ * The output items to send back for a finished turn, in output order.
+ *
+ * A function call is sent with the arguments `wireArguments` settles on, so
+ * a call whose streamed arguments were not a JSON object is replayed as `{}`,
+ * and with the id its tool result answers. A call or text that streamed but
+ * whose item never finished is still recorded, so the next request has the
+ * call each tool result refers to.
+ */
+function replayItems(
+    outputItems: { item: Record<string, unknown>; callKey?: string }[],
+    callKeys: string[],
+    toolCalls: AccumulatedToolCall[],
+    text: string
+): unknown[] {
+    const callByKey = new Map<string, AccumulatedToolCall>();
+    callKeys.forEach((key, position) => {
+        const call = toolCalls[position];
+        if (call) callByKey.set(key, call);
+    });
+
+    const replay: unknown[] = [];
+    const replayedKeys = new Set<string>();
+    for (const { item, callKey } of outputItems) {
+        const call = callKey ? callByKey.get(callKey) : undefined;
+        if (!call) {
+            replay.push(item);
+            continue;
+        }
+        replayedKeys.add(callKey!);
+        replay.push({ ...item, call_id: call.id, arguments: wireArguments(call) });
+    }
+
+    if (text.length > 0 && !outputItems.some(({ item }) => item.type === 'message')) {
+        replay.push({ role: 'assistant', content: text });
+    }
+    for (const key of callKeys) {
+        const call = callByKey.get(key);
+        if (!call || replayedKeys.has(key)) continue;
+        replay.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: wireArguments(call) });
+    }
+    return replay;
+}
 
 export function createOpenAiResponsesClient(): LlmClient {
     return {
@@ -220,7 +269,10 @@ export function createOpenAiResponsesClient(): LlmClient {
             const callKeyByItemId = new Map<string, string>();
             const callKeyByOutputIndex = new Map<number, string>();
             const argsReceived = new Set<string>();
-            const reasoningItems: unknown[] = [];
+            // Accumulator keys in the order the accumulator will close them.
+            const callKeys: string[] = [];
+            // Every finished output item, in output order, for replay.
+            const outputItems: { item: Record<string, unknown>; callKey?: string }[] = [];
             const citations: LlmCitation[] = [];
             let text = '';
             let thinking = '';
@@ -258,6 +310,7 @@ export function createOpenAiResponsesClient(): LlmClient {
                 const key =
                     existing ??
                     (typeof item?.id === 'string' && item.id ? `item:${item.id}` : `output:${String(outputIndex)}`);
+                if (!existing) callKeys.push(key);
                 if (typeof item?.id === 'string' && item.id) callKeyByItemId.set(item.id, key);
                 if (typeof outputIndex === 'number') callKeyByOutputIndex.set(outputIndex, key);
                 accumulator.open(key, {
@@ -308,18 +361,24 @@ export function createOpenAiResponsesClient(): LlmClient {
                                 accumulator.appendArguments(key, item.arguments);
                                 argsReceived.add(key);
                             }
+                            outputItems.push({ item, callKey: key });
                         } else if (item?.type === 'reasoning') {
+                            // Without its encrypted content a reasoning item
+                            // refers to stored state that does not exist.
                             if (typeof item.encrypted_content === 'string' && item.encrypted_content) {
-                                reasoningItems.push(item);
+                                outputItems.push({ item });
                             }
-                        } else if (item?.type === 'message' && Array.isArray(item.content)) {
-                            for (const part of item.content) {
-                                if (Array.isArray(part?.annotations)) {
-                                    for (const annotation of part.annotations) readCitation(annotation, citations);
+                        } else if (item && typeof item === 'object' && typeof item.type === 'string') {
+                            if (item.type === 'message' && Array.isArray(item.content)) {
+                                for (const part of item.content) {
+                                    if (Array.isArray(part?.annotations)) {
+                                        for (const annotation of part.annotations) readCitation(annotation, citations);
+                                    }
                                 }
+                            } else if (item.type === 'web_search_call' && item.status === 'failed') {
+                                handlers.onWarning?.('Web search failed.');
                             }
-                        } else if (item?.type === 'web_search_call' && item.status === 'failed') {
-                            handlers.onWarning?.('Web search failed.');
+                            outputItems.push({ item });
                         }
                         break;
                     }
@@ -371,6 +430,7 @@ export function createOpenAiResponsesClient(): LlmClient {
             const toolCalls = accumulator.close();
             if (toolCalls.length > 0 && finishReason === 'stop') finishReason = 'tool_calls';
             if (toolCalls.length > 0 && finishReason === 'unknown') finishReason = 'tool_calls';
+            const providerBlocks = replayItems(outputItems, callKeys, toolCalls, text);
 
             return {
                 text,
@@ -379,7 +439,7 @@ export function createOpenAiResponsesClient(): LlmClient {
                 finishReason,
                 usage,
                 ...(citations.length > 0 ? { citations } : {}),
-                ...(reasoningItems.length > 0 ? { providerBlocks: reasoningItems } : {}),
+                ...(providerBlocks.length > 0 ? { providerBlocks } : {}),
             };
         },
     };
