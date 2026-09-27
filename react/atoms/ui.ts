@@ -4,6 +4,7 @@ import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
+import { localModeEnabledAtom } from './localMode';
 import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 
 const isSidebarVisibleBaseAtom = atom(false);
@@ -109,7 +110,11 @@ export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpWriteToolsEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
-export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
+// Web search is a hosted (Beaver-credits or Plus Tools) capability. Local mode
+// has neither, and `requestPlusToolsAtom`'s initial value is a stale pref read
+// that can still be true from before local mode was enabled.
+export const isWebSearchAllowedAtom = atom((get) =>
+    !get(localModeEnabledAtom) && Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
 
 /**
