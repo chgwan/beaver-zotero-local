@@ -62,6 +62,23 @@ const isCallableEndpoint = (apiBase: string): boolean => {
     return url.protocol === 'https:' || url.protocol === 'http:';
 };
 
+/**
+ * Whether an endpoint is on this machine: `localhost`, `127.0.0.0/8` or `::1`.
+ * A server there (Ollama, llama.cpp) commonly needs no API key, and a request
+ * to it never crosses the network, so plain HTTP is fine.
+ */
+export function isLoopbackEndpoint(apiBase: string | null | undefined): boolean {
+    if (!apiBase) return false;
+    let url: URL;
+    try {
+        url = new URL(apiBase.trim());
+    } catch {
+        return false;
+    }
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return host === 'localhost' || host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
 export function resolveLocalAgentConfig(input: LocalAgentConfigInput): LocalConfigResult {
     const { model } = input;
 
@@ -71,7 +88,9 @@ export function resolveLocalAgentConfig(input: LocalAgentConfigInput): LocalConf
             'Choose a model in Beaver Preferences → API Keys before starting a chat.'
         );
     }
-    if (!model.api_key || model.api_key.trim().length === 0) {
+    // A server on this machine may run without a key; anything else needs one.
+    const hasApiKey = !!model.api_key && model.api_key.trim().length > 0;
+    if (!hasApiKey && !isLoopbackEndpoint(model.api_base)) {
         return fail(
             'no_api_key',
             `Add an API key for “${model.name}” in Beaver Preferences → API Keys.`

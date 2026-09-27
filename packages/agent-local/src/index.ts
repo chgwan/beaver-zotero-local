@@ -5,6 +5,7 @@
 export { LOCAL_AGENT_PACKAGE_VERSION } from './version';
 export {
     resolveLocalAgentConfig,
+    isLoopbackEndpoint,
     DEFAULT_MAX_ROUNDS,
     SUPPORTED_FORMATS,
 } from './config/localAgentConfig';

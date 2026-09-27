@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     resolveLocalAgentConfig,
+    isLoopbackEndpoint,
     DEFAULT_MAX_ROUNDS,
 } from '@beaver/agent-local/config/localAgentConfig';
 
@@ -71,6 +72,34 @@ describe('resolveLocalAgentConfig', () => {
     it('allows a loopback endpoint, which the hosted path forbids', () => {
         const model = { ...openAiModel, api_base: 'http://127.0.0.1:11434/v1' };
         expect(resolveLocalAgentConfig({ model, maxRounds: null }).ok).toBe(true);
+    });
+
+    it.each([
+        'http://localhost:11434/v1',
+        'http://127.0.0.1:8080/v1',
+        'http://127.1.2.3:8080/v1',
+        'http://[::1]:11434/v1',
+    ])('accepts a blank API key for the loopback endpoint %s', (api_base) => {
+        const model = { ...openAiModel, api_base, api_key: '' };
+        expect(resolveLocalAgentConfig({ model, maxRounds: null }).ok).toBe(true);
+    });
+
+    it.each([
+        'https://api.openai.com/v1',
+        'http://192.168.1.10:11434/v1',
+        'http://localhost.example.com/v1',
+    ])('still requires an API key for the non-loopback endpoint %s', (api_base) => {
+        const model = { ...openAiModel, api_base, api_key: '' };
+        expect(resolveLocalAgentConfig({ model, maxRounds: null })).toMatchObject({ ok: false, reason: 'no_api_key' });
+    });
+
+    it('recognises loopback endpoints', () => {
+        expect(isLoopbackEndpoint('http://localhost:1234')).toBe(true);
+        expect(isLoopbackEndpoint('http://127.0.0.1')).toBe(true);
+        expect(isLoopbackEndpoint('http://[::1]/v1')).toBe(true);
+        expect(isLoopbackEndpoint('http://10.0.0.1')).toBe(false);
+        expect(isLoopbackEndpoint('not a url')).toBe(false);
+        expect(isLoopbackEndpoint(undefined)).toBe(false);
     });
 
     it('honours a configured round cap', () => {

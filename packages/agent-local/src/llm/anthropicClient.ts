@@ -172,7 +172,8 @@ export function createAnthropicClient(): LlmClient {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'x-api-key': model.api_key,
+                        // A keyless local server gets no auth header at all.
+                        ...(model.api_key?.trim() ? { 'x-api-key': model.api_key } : {}),
                         'anthropic-version': ANTHROPIC_VERSION,
                         // A privileged Gecko `fetch` can still attach an `Origin`
                         // header, which Anthropic's browser-key check would
