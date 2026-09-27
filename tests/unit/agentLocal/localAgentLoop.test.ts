@@ -524,4 +524,91 @@ describe('runLocalAgentLoop', () => {
         expect(callbacks.onError.mock.calls[0][0].message).toContain('handler exploded');
         expect(callbacks.onDone).not.toHaveBeenCalled();
     });
+    describe('frame delivery', () => {
+        const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+        /**
+         * Models the renderer: returns and parts update an active run that
+         * `onDone` moves to history, so a frame that settles after `onDone`
+         * is lost.
+         */
+        const rendererLike = (cbs: ReturnType<typeof recordingCallbacks>) => {
+            const state = { active: [] as string[] | null, history: [] as string[] };
+            cbs.onPart.mockImplementation(async (e: any) => {
+                await tick();
+                state.active?.push(`part:${e.message_index}:${e.part_index}:${e.part.part_kind}`);
+            });
+            cbs.onToolReturn.mockImplementation(async (e: any) => {
+                await tick();
+                state.active?.push(`return:${e.part.tool_call_id}`);
+            });
+            cbs.onDone.mockImplementation(() => {
+                state.history = state.active ?? [];
+                state.active = null;
+            });
+            return state;
+        };
+
+        it('delivers the last round’s tool return before done at the round cap', async () => {
+            const state = rendererLike(callbacks);
+            const turns = Array.from({ length: 3 }, (_, i) => ({ toolCalls: [call(`c${i}`, { query: 'x' })] }));
+            await run(scriptedClient(turns), callbacks, stubCatalog(), { config: { ...config, maxRounds: 2 } });
+            expect(state.history).toEqual([
+                'part:0:0:tool-call',
+                'return:c0',
+                'part:2:0:tool-call',
+                'return:c1',
+            ]);
+            expect(callbacks.onWarning.mock.invocationCallOrder[0]).toBeLessThan(
+                callbacks.onDone.mock.invocationCallOrder[0]
+            );
+        });
+
+        it('preserves frame order with async part callbacks across rounds', async () => {
+            const state = rendererLike(callbacks);
+            const client = scriptedClient([
+                { thinkingChunks: ['h'], textChunks: ['Looking'], toolCalls: [call('c1', { query: 'x' }), call('c2', { query: 'y' })] },
+                { textChunks: ['Rea', 'Ready.'] },
+            ]);
+            await run(client, callbacks);
+            expect(state.history).toEqual([
+                'part:0:0:thinking',
+                'part:0:1:text',
+                'part:0:2:tool-call',
+                'part:0:3:tool-call',
+                'return:c1',
+                'return:c2',
+                'part:2:0:text',
+                'part:2:0:text',
+            ]);
+        });
+
+        it('settles every frame before the loop resolves', async () => {
+            const state = rendererLike(callbacks);
+            const client = {
+                streamTurn: vi.fn(async (_r: any, handlers: any) => {
+                    handlers.onTextDelta('partial');
+                    throw new LlmRequestError('server', 'upstream 502');
+                }),
+            };
+            callbacks.onError.mockImplementation(() => state.active?.push('error'));
+            await run(client, callbacks);
+            expect(state.active).toEqual(['part:0:0:text', 'error']);
+        });
+
+        it('keeps delivering frames when a callback throws, as the hosted transport does', async () => {
+            callbacks.onToolReturn.mockImplementation(async () => {
+                throw new Error('render failed');
+            });
+            const client = scriptedClient([
+                { toolCalls: [call('c1', { query: 'x' })] },
+                { textChunks: ['Ready.'] },
+            ]);
+            await run(client, callbacks);
+            expect(callbacks.onError).toHaveBeenCalledTimes(1);
+            expect(callbacks.onError.mock.calls[0][0]).toMatchObject({ type: 'event_handling_error' });
+            expect(client.streamTurn).toHaveBeenCalledTimes(2);
+            expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+        });
+    });
 });
