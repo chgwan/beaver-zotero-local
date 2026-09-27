@@ -40,7 +40,6 @@ export {
     ANTHROPIC_VERSION,
     ANTHROPIC_DEFAULT_MAX_TOKENS,
     ANTHROPIC_WEB_SEARCH_TOOL,
-    ANTHROPIC_WEB_SEARCH_TOOL_BASIC,
 } from './llm/anthropicClient';
 export { clientForFormat } from './llm/clientForFormat';
 export { supportsHostedWebSearch, isHostedWebSearchAvailable } from './llm/webSearchCapability';
