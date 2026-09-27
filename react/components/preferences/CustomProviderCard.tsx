@@ -26,6 +26,7 @@ import {
 import { localModeEnabledAtom } from "../../atoms/localMode";
 import { clientForFormat } from "@beaver/agent-local/llm/clientForFormat";
 import { testLocalProvider } from "./localProviderTest";
+import { LocalProviderTestRunner } from "./localProviderTestRunner";
 
 interface CustomProviderCardProps {
     model: CustomChatModel;
@@ -81,6 +82,8 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         model.context_window != null ? String(model.context_window) : ''
     );
     const nameInputRef = useRef<HTMLInputElement>(null);
+    const testRunnerRef = useRef<LocalProviderTestRunner | null>(null);
+    if (!testRunnerRef.current) testRunnerRef.current = new LocalProviderTestRunner();
 
     // Focus the Name field when a newly added provider mounts in its expanded state.
     useEffect(() => {
@@ -88,6 +91,11 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
             nameInputRef.current?.focus();
         }
     }, [autoFocusName]);
+
+    // Abort any in-flight local test on unmount so it can't set state afterward.
+    useEffect(() => {
+        return () => testRunnerRef.current?.dispose();
+    }, []);
 
     // --- Field updates (controlled by parent) ---
     const update = useCallback((patch: Partial<CustomChatModel>) => {
@@ -154,6 +162,8 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
 
     // --- Test endpoint (local mode: talk to the provider directly, no backend hop) ---
     const runLocalTest = useCallback(async () => {
+        // Cancel a prior in-flight test (and stop applying its result) before starting this one.
+        const signal = testRunnerRef.current!.start();
         setTestStatus('loading');
         setLocalTestMessage(null);
         setTestError(null);
@@ -169,10 +179,17 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 supports_vision: model.supports_vision,
             },
             client,
+            undefined,
+            signal,
         );
+        // Discard a result that arrived after unmount or after a newer test superseded this one.
+        if (!testRunnerRef.current!.isCurrent(signal)) return;
         if (result.ok) {
             setLocalTestMessage(result.message);
             setTestStatus('success');
+        } else if (result.cancelled) {
+            // User-initiated cancellation, not a provider failure — don't show it as an error.
+            setTestStatus('idle');
         } else {
             setTestStatus('error');
             setTestError(result.message);
