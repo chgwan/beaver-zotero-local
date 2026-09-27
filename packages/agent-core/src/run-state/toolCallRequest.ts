@@ -163,6 +163,9 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     create_items: 'Import items',
     external_search: 'Web search',
+    // Local mode's literature search. Not "Web search": that names the
+    // provider's hosted search.
+    scholarly_search: 'Literature search',
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
 

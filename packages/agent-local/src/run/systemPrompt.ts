@@ -13,6 +13,9 @@ export interface SystemPromptOptions {
     customInstructions?: string;
 }
 
+/** Library search tools the scholarly-search guidance points the model to. */
+const LIBRARY_SEARCH_TOOLS = ['zotero_search', 'item_search_by_metadata'];
+
 export function buildSystemPrompt(options: SystemPromptOptions): string {
     const lines = [
         'You are Beaver, a research assistant working with the user’s Zotero library.',
@@ -24,6 +27,17 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
         'Say plainly when a search finds nothing relevant. Do not invent references,',
         'authors, or findings.',
     ];
+
+    // Literature search finds what exists, not what the user has. A model that
+    // blurs the two cites papers as though the user owned them.
+    if (options.toolNames.includes('scholarly_search')) {
+        const libraryTools = LIBRARY_SEARCH_TOOLS.filter((name) => options.toolNames.includes(name));
+        const scope =
+            libraryTools.length > 0
+                ? `Use ${libraryTools.join(' and ')} for what is in the user’s library, and scholarly_search for published work outside it`
+                : 'Use scholarly_search for published work outside the user’s library';
+        lines.push('', `${scope}; never present a scholarly_search result as being in the user’s library.`);
+    }
 
     if (options.toolNames.length > 0) {
         lines.push('', `Tools available: ${options.toolNames.join(', ')}.`);

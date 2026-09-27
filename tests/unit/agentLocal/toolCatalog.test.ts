@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildToolCatalog, READ_ONLY_TOOLS } from '@beaver/agent-local/tools/toolCatalog';
+import { createScholarlySearchTool } from '@beaver/agent-local/search/scholarlySearchTool';
 import {
     READ_ATTACHMENT_MAX_CHARS,
     READ_ATTACHMENT_MIN_CHARS,
@@ -420,5 +421,141 @@ describe('read_attachment', () => {
         );
         const result = await catalog.execute('read_attachment', { attachment_id: 'g5-ABC12345' }, signal);
         expect(result).toEqual({ ok: false, retryable: false, error: 'Library excluded' });
+    });
+});
+
+describe('native tools', () => {
+    const echoSpec = {
+        name: 'echo_search',
+        description: 'Echo the query back, for testing the native tool path.',
+        parameters: {
+            type: 'object' as const,
+            properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1 } },
+            required: ['query'],
+            additionalProperties: false as const,
+        },
+    };
+
+    const nativeTool = (run = vi.fn(async (args: Record<string, unknown>) => ({
+        ok: true as const,
+        content: { echoed: args.query },
+        text: String(args.query),
+        metadata: { supplemental_data: [] },
+    }))) => ({ tool: { spec: echoSpec, run }, run });
+
+    it('offers native tools after the handler tools, with only the model-facing fields', () => {
+        const { tool } = nativeTool();
+        const catalog = buildToolCatalog({
+            provider: providerWith({ list_libraries_request: vi.fn() }),
+            searchableLibraryIds: [1],
+            nativeTools: [tool],
+        });
+        expect(catalog.definitions().map((t) => t.name)).toEqual(['list_libraries', 'echo_search']);
+        expect(catalog.definitions()[1]).toEqual(echoSpec);
+    });
+
+    it('offers no native tool when none is given', () => {
+        const catalog = buildToolCatalog({
+            provider: providerWith({ list_libraries_request: vi.fn() }),
+            searchableLibraryIds: [1],
+        });
+        expect(catalog.definitions().map((t) => t.name)).not.toContain('echo_search');
+    });
+
+    it('runs a native tool with its arguments, the signal, and passes its metadata through', async () => {
+        const { tool, run } = nativeTool();
+        const catalog = buildToolCatalog({ provider: {}, searchableLibraryIds: [1], nativeTools: [tool] });
+        const result = await catalog.execute('echo_search', { query: 'graphene', limit: null }, signal);
+        expect(run).toHaveBeenCalledWith({ query: 'graphene' }, signal);
+        expect(result).toEqual({
+            ok: true,
+            content: { echoed: 'graphene' },
+            text: 'graphene',
+            metadata: { supplemental_data: [] },
+        });
+    });
+
+    it('runs a native tool when no library is searchable, while handler tools still refuse', async () => {
+        const { tool, run } = nativeTool();
+        const handle = vi.fn();
+        const catalog = buildToolCatalog({
+            provider: providerWith({ list_libraries_request: handle }),
+            searchableLibraryIds: [],
+            nativeTools: [tool],
+        });
+
+        expect(await catalog.execute('echo_search', { query: 'x' }, signal)).toMatchObject({ ok: true });
+        expect(run).toHaveBeenCalledTimes(1);
+
+        expect(await catalog.execute('list_libraries', {}, signal)).toMatchObject({ ok: false, retryable: false });
+        expect(handle).not.toHaveBeenCalled();
+    });
+
+    it('validates native tool arguments against its schema before running it', async () => {
+        const { tool, run } = nativeTool();
+        const catalog = buildToolCatalog({ provider: {}, searchableLibraryIds: [1], nativeTools: [tool] });
+        const result = await catalog.execute('echo_search', { query: 'x', bogus: true }, signal);
+        expect(result).toMatchObject({ ok: false, retryable: true });
+        if (!result.ok) expect(result.error).toContain('bogus');
+        expect(run).not.toHaveBeenCalled();
+    });
+
+    it('turns a native tool that throws into a retryable failure', async () => {
+        const { tool } = nativeTool(vi.fn(async () => {
+            throw new Error('socket hang up');
+        }));
+        const catalog = buildToolCatalog({ provider: {}, searchableLibraryIds: [1], nativeTools: [tool] });
+        const result = await catalog.execute('echo_search', { query: 'x' }, signal);
+        expect(result).toMatchObject({ ok: false, retryable: true });
+        if (!result.ok) expect(result.error).toContain('socket hang up');
+    });
+
+    it('names native tools among the valid tools for an unknown call', async () => {
+        const { tool } = nativeTool();
+        const catalog = buildToolCatalog({ provider: {}, searchableLibraryIds: [1], nativeTools: [tool] });
+        const result = await catalog.execute('nope', {}, signal);
+        if (!result.ok) expect(result.error).toContain('echo_search');
+        else throw new Error('expected failure');
+    });
+
+    it('refuses a native tool whose name collides with a handler tool', () => {
+        const { tool } = nativeTool();
+        expect(() =>
+            buildToolCatalog({
+                provider: providerWith({ list_libraries_request: vi.fn() }),
+                searchableLibraryIds: [1],
+                nativeTools: [{ ...tool, spec: { ...echoSpec, name: 'list_libraries' } }],
+            })
+        ).toThrow(/list_libraries/);
+    });
+});
+
+describe('scholarly_search in the catalog', () => {
+    const source = (results: unknown[] = []) => ({
+        name: 'OpenAlex',
+        search: vi.fn(async () => ({ ok: true as const, results: results as any[] })),
+    });
+
+    it('is offered when the scholarly search tool is given, and absent otherwise', () => {
+        const enabled = buildToolCatalog({
+            provider: {},
+            searchableLibraryIds: [1],
+            nativeTools: [createScholarlySearchTool({ sources: [source()] })],
+        });
+        const disabled = buildToolCatalog({ provider: {}, searchableLibraryIds: [1] });
+        expect(enabled.definitions().map((t) => t.name)).toEqual(['scholarly_search']);
+        expect(disabled.definitions().map((t) => t.name)).toEqual([]);
+    });
+
+    it('executes with the model query when every library is excluded', async () => {
+        const s = source();
+        const catalog = buildToolCatalog({
+            provider: {},
+            searchableLibraryIds: [],
+            nativeTools: [createScholarlySearchTool({ sources: [s] })],
+        });
+        const result = await catalog.execute('scholarly_search', { query: 'graphene', year_from: null }, signal);
+        expect(result).toMatchObject({ ok: true });
+        expect(s.search.mock.calls[0][0]).toMatchObject({ query: 'graphene' });
     });
 });

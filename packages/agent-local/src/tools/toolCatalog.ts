@@ -2,22 +2,35 @@
  * The tool surface offered to the model, and the bridge from a tool call to the
  * data-provider handler that implements it.
  *
- * Tools are declarations over the handlers the hosted path already uses, so a
- * tool behaves the same in both modes. The handlers enforce the library scope
- * themselves. This layer owns what they cannot: which tools exist at all, that
- * arguments match the advertised schema before a handler runs, that a run with
- * no searchable library never reaches a handler, and that a failing tool
+ * Most tools are declarations over the handlers the hosted path already uses,
+ * so a tool behaves the same in both modes. The handlers enforce the library
+ * scope themselves. This layer owns what they cannot: which tools exist at all,
+ * that arguments match the advertised schema before a handler runs, that a run
+ * with no searchable library never reaches a handler, and that a failing tool
  * becomes a result the model can react to instead of an exception that ends
  * the run.
+ *
+ * Native tools are implemented in this package rather than by a handler, and
+ * read nothing from the user's libraries (literature search queries public
+ * databases). They get the same argument validation and failure handling, but
+ * not the empty-scope refusal: excluding every library does not take away a
+ * tool that never touches one.
  */
 
 import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
 import { isPreparedJsonMessage } from '@beaver/agent-core/transport/preparedJsonMessage';
 import { validateArgs } from './argValidation';
-import { READ_ONLY_TOOLS, type LocalToolDefinition, type ToolArgs } from './toolSchemas';
+import { READ_ONLY_TOOLS, type ToolArgs, type ToolSpec } from './toolSchemas';
 
 export { READ_ONLY_TOOLS };
-export type { LocalToolDefinition, JsonSchema, ToolArgs, ToolRequest, ToolRequestLimits } from './toolSchemas';
+export type {
+    LocalToolDefinition,
+    JsonSchema,
+    ToolArgs,
+    ToolRequest,
+    ToolRequestLimits,
+    ToolSpec,
+} from './toolSchemas';
 
 /**
  * The structural subset of the host's data-provider map this catalog uses.
@@ -34,14 +47,22 @@ export interface AgentDataProviderLike {
 }
 
 /**
- * Outcome of one tool call. On success `content` is the handler's response
- * object, which the result views render, and `text` is the same response
- * serialised for the model's transcript. `retryable` tells the model whether
- * calling again with different arguments can succeed.
+ * Outcome of one tool call. On success `content` is the response object the
+ * result views render, and `text` is what the model's transcript receives. A
+ * tool that knows its own render metadata supplies it as `metadata`; for
+ * handler tools the loop derives it instead. `retryable` tells the model
+ * whether calling again with different arguments can succeed.
  */
 export type ToolExecutionResult =
-    | { ok: true; content: Record<string, unknown>; text: string }
+    | { ok: true; content: Record<string, unknown>; text: string; metadata?: Record<string, unknown> }
     | { ok: false; error: string; retryable: boolean };
+
+/** A tool implemented in this package, with no data-provider handler behind it. */
+export interface NativeTool {
+    spec: ToolSpec;
+    /** Run with schema-valid arguments. May throw; the catalog reports it as a failure. */
+    run(args: ToolArgs, signal: AbortSignal): Promise<ToolExecutionResult>;
+}
 
 export interface ToolCatalogOptions {
     provider: AgentDataProviderLike;
@@ -52,10 +73,12 @@ export interface ToolCatalogOptions {
     searchableLibraryIds: readonly number[];
     /** The model's context window in tokens, when known; bounds what a read returns. */
     contextWindow?: number | null;
+    /** Tools offered after the handler tools. They take no library scope. */
+    nativeTools?: readonly NativeTool[];
 }
 
 export interface LocalToolCatalog {
-    definitions(): LocalToolDefinition[];
+    definitions(): ToolSpec[];
     execute(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ToolExecutionResult>;
 }
 
@@ -81,6 +104,9 @@ const isUndefined = (v: unknown) => v === undefined;
 
 const describeError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/** The model-facing fields of a tool, without the handler mapping. */
+const specOf = ({ name, description, parameters }: ToolSpec): ToolSpec => ({ name, description, parameters });
+
 /** The failure a response reports, or null for a successful response. */
 const responseFailure = (response: Record<string, unknown>): ToolExecutionResult | null => {
     const hasError = response.error !== undefined && response.error !== null && response.error !== '';
@@ -101,16 +127,45 @@ export function buildToolCatalog(options: ToolCatalogOptions): LocalToolCatalog 
     const available = READ_ONLY_TOOLS.filter((tool) => !!provider[tool.requestEvent]);
     const byName = new Map(available.map((tool) => [tool.name, tool]));
 
+    const nativeTools = options.nativeTools ?? [];
+    const nativeByName = new Map<string, NativeTool>();
+    for (const tool of nativeTools) {
+        // Two tools under one name would leave the model unable to reach one.
+        if (byName.has(tool.spec.name) || nativeByName.has(tool.spec.name)) {
+            throw new Error(`Tool name "${tool.spec.name}" is declared twice.`);
+        }
+        nativeByName.set(tool.spec.name, tool);
+    }
+
+    const definitions = [...available.map(specOf), ...nativeTools.map((tool) => specOf(tool.spec))];
+
     return {
-        definitions: () => [...available],
+        definitions: () => [...definitions],
 
         async execute(name, rawArgs, signal): Promise<ToolExecutionResult> {
+            // Models commonly send null for an optional argument they mean to
+            // omit; the tools read an absent field the same way.
+            const args: ToolArgs = isRecord(rawArgs) ? without(rawArgs, isNullish) : rawArgs;
+
+            const native = nativeByName.get(name);
+            if (native) {
+                const invalid = validateArgs(args, native.spec.parameters);
+                if (invalid) {
+                    return { ok: false, retryable: true, error: `Invalid arguments for ${name}: ${invalid}` };
+                }
+                try {
+                    return await native.run(args, signal);
+                } catch (error) {
+                    return { ok: false, retryable: true, error: `Tool "${name}" failed: ${describeError(error)}` };
+                }
+            }
+
             const tool = byName.get(name);
             if (!tool) {
                 return {
                     ok: false,
                     retryable: true,
-                    error: `Unknown tool "${name}". Available tools: ${available.map((t) => t.name).join(', ')}.`,
+                    error: `Unknown tool "${name}". Available tools: ${definitions.map((t) => t.name).join(', ')}.`,
                 };
             }
 
@@ -127,9 +182,6 @@ export function buildToolCatalog(options: ToolCatalogOptions): LocalToolCatalog 
                 };
             }
 
-            // Models commonly send null for an optional argument they mean to
-            // omit; the handlers read an absent field the same way.
-            const args: ToolArgs = isRecord(rawArgs) ? without(rawArgs, isNullish) : rawArgs;
             const invalid = validateArgs(args, tool.parameters) ?? tool.checkArgs?.(args) ?? null;
             if (invalid) {
                 return { ok: false, retryable: true, error: `Invalid arguments for ${name}: ${invalid}` };

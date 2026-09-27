@@ -783,6 +783,20 @@ describe('buildLegacyView — external references', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
+    it('builds an empty external_reference_list for a scholarly_search that found nothing', async () => {
+        const part: ToolReturnPart = {
+            part_kind: 'tool-return',
+            tool_name: 'scholarly_search',
+            content: { references: [], notes: [], total_found: 0 },
+            tool_call_id: 'c',
+            metadata: { supplemental_data: [] },
+        };
+        const view = (await buildLegacyView(part)) as ExternalReferenceListView;
+        expect(view.view_type).toBe('external_reference_list');
+        expect(view.tool_name).toBe('scholarly_search');
+        expect(view.references).toEqual([]);
+    });
+
     it('builds a lookup_work view with found/not-found/unavailable extras', async () => {
         const part: ToolReturnPart = {
             part_kind: 'tool-return',

@@ -22,11 +22,13 @@ export type {
     JsonSchema,
     LocalToolCatalog,
     LocalToolDefinition,
+    NativeTool,
     ToolArgs,
     ToolCatalogOptions,
     ToolExecutionResult,
     ToolRequest,
     ToolRequestLimits,
+    ToolSpec,
 } from './tools/toolCatalog';
 export { readSseEvents } from './llm/sseReader';
 export type { SseEvent } from './llm/sseReader';
@@ -94,3 +96,4 @@ export {
 } from './search/semanticScholar';
 export { runScholarlySearch, DEFAULT_RESULT_LIMIT, MAX_RESULT_LIMIT } from './search/scholarlySearch';
 export type { ScholarlySearchOptions, ScholarlySearchOutcome } from './search/scholarlySearch';
+export { createScholarlySearchTool, SCHOLARLY_SEARCH_SPEC } from './search/scholarlySearchTool';

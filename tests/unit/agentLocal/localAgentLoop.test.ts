@@ -5,6 +5,7 @@ import type { AccumulatedToolCall } from '@beaver/agent-local/llm/toolCallAccumu
 import type { LocalAgentConfig } from '@beaver/agent-local/config/localAgentConfig';
 import { ELIDED_TOOL_RESULT } from '@beaver/agent-local/run/contextBudget';
 import { ProcessingMode, SubscriptionStatus } from '@beaver/agent-core/types/profile';
+import { isExternalSearchResult } from '@beaver/agent-core/run-state/toolResultTypes';
 
 const config: LocalAgentConfig = {
     model: {
@@ -377,6 +378,24 @@ describe('runLocalAgentLoop', () => {
             result_count: 1,
             items: [{ library_id: 1, zotero_key: 'AAA' }],
         });
+    });
+
+    it('attaches the metadata a tool supplies itself, so a scholarly search renders as reference cards', async () => {
+        const content = { references: [{ external_id: 'W1', title: 'Paper', rank: 1 }], notes: [], total_found: 1 };
+        const metadata = { supplemental_data: [{ external_id: 'W1', source: 'openalex' }] };
+        const catalog = stubCatalog({
+            execute: vi.fn(async () => ({ ok: true, content, text: '1. Paper', metadata })),
+        });
+        const client = scriptedClient([
+            { toolCalls: [call('c1', { query: 'x' }, null, 'scholarly_search')] },
+            { textChunks: ['Ready.'] },
+        ]);
+        await run(client, callbacks, catalog);
+        const part = callbacks.onToolReturn.mock.calls[0][0].part;
+        expect(part.metadata).toEqual(metadata);
+        expect(isExternalSearchResult(part.tool_name, part.content, part.metadata)).toBe(true);
+        const toolMessage = client.streamTurn.mock.calls[1][0].messages.find((m: any) => m.role === 'tool');
+        expect(toolMessage.content).toBe('1. Paper');
     });
 
     it('elides older tool results before a call that would overflow the context window', async () => {
