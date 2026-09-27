@@ -98,14 +98,35 @@ const isPrivateOrReservedHost = (host: string): boolean => {
     return false;
 };
 
+export interface ValidateApiBaseOptions {
+    /**
+     * Allow http:, localhost, and private-range hosts.
+     *
+     * Only true in local mode, where the request is made by the plugin on the
+     * user's own machine. The hosted path keeps the strict rule because there
+     * the request originates from Beaver's backend, where a private address is
+     * an SSRF vector.
+     */
+    allowLocalEndpoints: boolean;
+}
+
 /**
- * Mirror of the backend SSRF protection for custom endpoints. Beaver routes
- * every request through its own backend, so custom endpoints must be reachable
- * from the public internet over HTTPS. Localhost, private networks, and reserved
- * IP ranges are rejected. Keeping this check client-side gives users an immediate
- * error before a request is attempted.
+ * Validate a custom provider's endpoint URL.
+ *
+ * Hosted mode (`allowLocalEndpoints: false`) mirrors the backend's SSRF
+ * protection: Beaver routes every request through its own backend, so the
+ * endpoint must use HTTPS and be reachable from the public internet —
+ * localhost, private networks, and reserved IP ranges are rejected.
+ *
+ * Local mode (`allowLocalEndpoints: true`) runs the request from the user's
+ * own machine, so a local server is a first-class endpoint: plain HTTP and
+ * loopback/private hosts are allowed. A non-http(s) protocol and a URL that
+ * fails to parse are still rejected either way.
  */
-export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiBaseValidationResult => {
+export const validateProviderApiBase = (
+    apiBase: string | undefined,
+    options: ValidateApiBaseOptions,
+): ApiBaseValidationResult => {
     const value = (apiBase ?? '').trim();
     if (!value) {
         return { valid: false, error: 'An endpoint URL is required for custom providers.' };
@@ -114,8 +135,18 @@ export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiB
     try {
         url = new URL(value);
     } catch {
-        return { valid: false, error: 'Enter a valid URL, for example https://api.example.com/v1.' };
+        return options.allowLocalEndpoints
+            ? { valid: false, error: 'Enter a valid URL, for example http://localhost:11434/v1.' }
+            : { valid: false, error: 'Enter a valid URL, for example https://api.example.com/v1.' };
     }
+
+    if (options.allowLocalEndpoints) {
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            return { valid: false, error: 'The endpoint must use http or https.' };
+        }
+        return { valid: true };
+    }
+
     if (url.protocol !== 'https:') {
         return { valid: false, error: 'The endpoint must use HTTPS. Plain HTTP endpoints are blocked.' };
     }
@@ -128,3 +159,11 @@ export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiB
     }
     return { valid: true };
 };
+
+/**
+ * Hosted-path validation. Unchanged behaviour; mirrors the backend rule.
+ * Kept as a thin wrapper so existing callers (and their error messages) never
+ * have to know the shared parser also serves local mode.
+ */
+export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiBaseValidationResult =>
+    validateProviderApiBase(apiBase, { allowLocalEndpoints: false });
