@@ -116,7 +116,13 @@ export class FrameEmitter {
     private enqueue(frame: QueuedFrame): void {
         this.queue.push(frame);
         if (frame.coordinate) this.queuedParts.set(frame.coordinate, frame);
-        if (!this.draining) this.draining = this.drain();
+        if (this.draining) return;
+        // Publish the drain before starting it: a callback that throws
+        // synchronously lets `drain()` finish before it first suspends, and
+        // its own reset of `draining` must not be overwritten afterwards.
+        let settle!: () => void;
+        this.draining = new Promise<void>((resolve) => (settle = resolve));
+        void this.drain(settle);
     }
 
     private enqueuePart(event: WSPartEvent): void {
@@ -136,29 +142,36 @@ export class FrameEmitter {
      * failure and delivery continues with the next frame, as the hosted
      * transport does.
      */
-    private async drain(): Promise<void> {
-        while (this.queue.length > 0) {
-            const frame = this.queue.shift()!;
-            if (frame.coordinate && this.queuedParts.get(frame.coordinate) === frame) {
-                this.queuedParts.delete(frame.coordinate);
-            }
-            try {
-                await frame.deliver();
-            } catch (error) {
-                log(`a run frame callback failed: ${error}`);
+    private async drain(settle: () => void): Promise<void> {
+        // No `await` may sit between the queue emptying and `draining` being
+        // cleared: a frame enqueued in that gap would find a drain that is
+        // about to stop and never be delivered.
+        try {
+            while (this.queue.length > 0) {
+                const frame = this.queue.shift()!;
+                if (frame.coordinate && this.queuedParts.get(frame.coordinate) === frame) {
+                    this.queuedParts.delete(frame.coordinate);
+                }
                 try {
-                    this.callbacks.onError({
-                        event: 'error',
-                        type: 'event_handling_error',
-                        message: 'Failed to handle server event',
-                        details: String(error),
-                    });
-                } catch (reportError) {
-                    log(`reporting a callback failure failed: ${reportError}`);
+                    await frame.deliver();
+                } catch (error) {
+                    log(`a run frame callback failed: ${error}`);
+                    try {
+                        this.callbacks.onError({
+                            event: 'error',
+                            type: 'event_handling_error',
+                            message: 'Failed to handle server event',
+                            details: String(error),
+                        });
+                    } catch (reportError) {
+                        log(`reporting a callback failure failed: ${reportError}`);
+                    }
                 }
             }
+        } finally {
+            this.draining = null;
+            settle();
         }
-        this.draining = null;
     }
 
     /** Coordinates closed to further writes, as `messageIndex:partIndex`. */
