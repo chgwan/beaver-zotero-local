@@ -81,6 +81,13 @@ const excerpt = (text: string): string => {
 
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
+const WEB_SEARCH_HINT = 'The user asked you to search the web for this request.';
+
+export interface RenderUserPromptOptions {
+    /** True when the user explicitly enabled provider-hosted web search for this run. */
+    webSearchRequested?: boolean;
+}
+
 const quoted = (text: string | null | undefined): string => (text ? ` "${excerpt(text)}"` : '');
 
 /** The id the tools accept for an object `key` in `ref`'s library. */
@@ -182,8 +189,13 @@ function describeState(state: ApplicationStateInput): string[] {
  * context that is present. A prompt with nothing but text renders as that
  * text unchanged.
  */
-export function renderUserPrompt(prompt: BeaverAgentPrompt): string {
+export function renderUserPrompt(prompt: BeaverAgentPrompt, options: RenderUserPromptOptions = {}): string {
     const sections: string[] = [prompt.content ?? ''];
+
+    // The model otherwise has no way to tell "the user toggled web search on"
+    // from "the run happens to have it available" — the hint is the only
+    // signal that the request itself calls for a live search.
+    if (options.webSearchRequested) sections.push(WEB_SEARCH_HINT);
 
     const actions = describeActions(prompt.actions ?? []);
     if (actions.length > 0) sections.push(actions.join('\n'));
