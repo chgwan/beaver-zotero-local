@@ -716,25 +716,32 @@ describe("instance account in local mode", () => {
         expect(beaver.searchableLibraryIds).toEqual([2]);
     });
 
-    it.each(["{not json", JSON.stringify({ type: "user" })])(
-        "starts with every library searchable and logs a warning when the exclusion list is unreadable: %s",
-        (raw) => {
+    it.each([
+        ["unparseable JSON", "{not json"],
+        ["a non-array value", JSON.stringify({ type: "user" })],
+        [
+            "one invalid entry among valid ones",
+            JSON.stringify([{ type: "user" }, { type: "group", group_id: "7" }]),
+        ],
+        ["a null entry", JSON.stringify([{ type: "group", group_id: 7 }, null])],
+    ])(
+        "makes no library searchable when the exclusion list has %s",
+        (_case, raw) => {
             setPref("localExcludedLibraries", raw);
             expect(() => account.start()).not.toThrow();
-            expect(beaver.searchableLibraryIds).toEqual([1, 2]);
+            expect(beaver.searchableLibraryIds).toEqual([]);
             expect(beaver.libraryScopeInitialized).toBe(true);
-            expect(Zotero.logError).toHaveBeenCalled();
+            expect(account.getSnapshot().scopeReady).toBe(true);
+            expect(Zotero.logError).toHaveBeenCalledTimes(1);
         },
     );
 
-    it("ignores malformed entries but honours the valid ones", () => {
-        setPref(
-            "localExcludedLibraries",
-            JSON.stringify([{ type: "group", group_id: 7 }, { type: "feed" }, null]),
-        );
+    it("reads the exclusion list once at start", () => {
         account.start();
-        expect(beaver.searchableLibraryIds).toEqual([1]);
-        expect(Zotero.logError).toHaveBeenCalled();
+        setPref("localExcludedLibraries", JSON.stringify([{ type: "user" }]));
+        account.subscribe(vi.fn());
+        (account as any).publish();
+        expect(beaver.searchableLibraryIds).toEqual([1, 2]);
     });
 
     it("never contacts the backend from refresh, thread claiming or auth reads", async () => {
