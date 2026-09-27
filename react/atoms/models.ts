@@ -148,10 +148,17 @@ export const selectableModelsAtom = atom((get) => {
 
 
 /**
- * Derived atom that returns the default Beaver model from the available models
+ * Derived atom that returns the default Beaver model from the available models.
+ * In local mode there is no Beaver-hosted model to default to — the "default"
+ * is the first selectable (custom) model instead, matching what the menu
+ * offers.
  */
 export const beaverDefaultModelAtom = atom<ModelConfig | null>(
     get => {
+        if (get(localModeEnabledAtom)) {
+            const selectable = get(selectableModelsAtom);
+            return selectable.find((m) => m.is_default) ?? selectable[0] ?? null;
+        }
         const beaverModels = get(availableModelsAtom).filter((m) => m.allow_app_key && !m.is_custom);
         return beaverModels.find((m) => m.is_default) ?? beaverModels[0] ?? null;
     }
@@ -165,8 +172,13 @@ export const validateSelectedModelAtom = atom(
     null,
     (get, set) => {
         const selectedModel = get(selectedModelAtom);
-        const availableModels = get(availableModelsAtom);
-        
+        // In local mode, only custom-provider models are ever selectable — a
+        // hosted/BYOK model left over from an earlier signed-in session (or
+        // from `lastUsedModel`) must not validate as still selected.
+        const availableModels = get(localModeEnabledAtom)
+            ? get(selectableModelsAtom)
+            : get(availableModelsAtom);
+
         // Default model
         let defaultModel = availableModels.find(model => model.is_default) || null;
         if (!defaultModel && availableModels.length > 0) defaultModel = availableModels[0];
