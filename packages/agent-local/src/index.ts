@@ -30,6 +30,17 @@ export { readSseEvents } from './llm/sseReader';
 export type { SseEvent } from './llm/sseReader';
 export { ToolCallAccumulator } from './llm/toolCallAccumulator';
 export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
+export { createOpenAiClient } from './llm/openAiClient';
+export { LlmRequestError, classifyHttpStatus, providerErrorMessage, joinEndpoint } from './llm/types';
+export type {
+    LlmClient,
+    LlmMessage,
+    LlmStreamHandlers,
+    LlmFinishReason,
+    LlmTurnResult,
+    LlmTurnRequest,
+    LlmErrorKind,
+} from './llm/types';
 export { FrameEmitter } from './run/frameEmitter';
 export type {
     FrameEmitterOptions,
