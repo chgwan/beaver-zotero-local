@@ -35,8 +35,15 @@ const parseBlock = (block: string): SseEvent | null => {
     return { event, data: dataLines.join('\n') };
 };
 
+/**
+ * A streamed response body. Named through `Response` so the reader typechecks
+ * both against this package's narrow host declarations and against the DOM
+ * library of a host program that imports it.
+ */
+type StreamedBody = NonNullable<Response['body']>;
+
 export async function* readSseEvents(
-    body: ResponseBody,
+    body: StreamedBody,
     signal: AbortSignal
 ): AsyncGenerator<SseEvent> {
     const reader = body.getReader();
