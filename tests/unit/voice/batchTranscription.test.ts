@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { gunzipSync } from "node:zlib";
 import { BatchTranscription } from "../../../src/services/voice/batchTranscription";
 import {
     VOICE_FORMAT,
     type VoiceRecording,
 } from "@beaver/agent-core/voice/contracts";
+import {
+    resetBackendAccessPolicyForTesting,
+    setBackendAccessPolicy,
+} from "@beaver/agent-core/transport/backendAccessPolicy";
+beforeEach(() => {
+    resetBackendAccessPolicyForTesting();
+});
 const session = {
     version: 1 as const,
     sessionId: "ee409e96-1ca2-40e8-a953-061f48154a74",
@@ -38,6 +45,15 @@ function setup(body: unknown = success(), status = 200, validate = () => true) {
     return { adapter, fetcher };
 }
 describe("batch upload", () => {
+    it("never uploads while backend access is blocked", async () => {
+        setBackendAccessPolicy(() => false);
+        const { adapter, fetcher } = setup();
+        expect(await adapter.transcribe(recording(), "credential")).toEqual({
+            ...session,
+            error: { code: "disabled" },
+        });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
     it.each([8000, 1920000])(
         "uploads one exact gzip member preserving %i samples and the wire metadata",
         async (samples) => {

@@ -9,6 +9,7 @@
 
 import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { getApiBaseUrl } from './config';
+import { assertBackendAccessAllowed } from './backendAccessPolicy';
 import { logger } from '../platform/logger';
 import { AgentRun } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
@@ -67,6 +68,9 @@ import {
  * Shared by the chat connection (AgentService) and the provider connection.
  */
 export async function getWSAuthToken(): Promise<string> {
+    // Both backend sockets authenticate through here, so refusing before the
+    // session read keeps either from opening while backend access is blocked.
+    assertBackendAccessAllowed('ws.auth');
     const generation = getCredentialGeneration();
     const { data, error } = await credentials.getSession();
     assertCredentialGeneration(generation);
@@ -293,6 +297,9 @@ export class AgentService {
         connectRecovery?: ConnectRecoveryAuthFields,
         extractSchemaVersions?: ExtractSchemaVersionsWire,
     ): Promise<void> {
+        // Refuse before touching connection state, so a blocked run is not
+        // reported as a connection failure or retried.
+        assertBackendAccessAllowed('agentService.connect');
         const connectTelemetry = connectRecovery ?? connectRecoveryAuthFields(1, null);
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {

@@ -1,6 +1,7 @@
 import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseConfig, markSupabaseConfigInUse } from './config';
 import { logger } from '../platform/logger';
+import { assertBackendAccessAllowed } from './backendAccessPolicy';
 
 /**
  * Storage backend Supabase persists the auth session into. Matches the subset of
@@ -467,6 +468,10 @@ export function setSupabaseClientProvider(provider: () => SupabaseClientInstance
 }
 
 function getSupabaseClient(): SupabaseClientInstance {
+    // Checked on every access, before either path, so a blocked host neither
+    // constructs a client (whose auth init would restore and refresh a stored
+    // session) nor reaches one owned by another realm.
+    assertBackendAccessAllowed('supabase.client');
     if (clientProvider) return clientProvider();
     supabaseInstance ??= createSupabaseClient();
     return supabaseInstance;
