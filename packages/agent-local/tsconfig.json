@@ -30,6 +30,7 @@
   "files": [
     "./src/globals.d.ts",
     "./src/version.ts",
+    "./src/config/localAgentConfig.ts",
     "./src/index.ts"
   ]
 }
