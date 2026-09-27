@@ -139,7 +139,8 @@ export function createOpenAlexSource(options: { apiKey?: string } = {}): Scholar
     const { apiKey } = options;
 
     return {
-        name: 'openalex',
+        // Human-readable: this is what a merge failure note names to the model.
+        name: 'OpenAlex',
         async search(query, signal) {
             await openAlexGate.wait(signal);
 
