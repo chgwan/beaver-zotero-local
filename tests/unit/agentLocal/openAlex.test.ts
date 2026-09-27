@@ -88,7 +88,10 @@ describe('createOpenAlexSource', () => {
         expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer secret-key');
 
         fetchMock.mockClear();
-        await createOpenAlexSource({ apiKey: '' }).search({ query: 'x', limit: 1 }, signal());
+        // Fresh module instance so the second call does not pay the real
+        // HostGate interval left behind by the first (fetch stays stubbed).
+        const second = await loadModule();
+        await second.createOpenAlexSource({ apiKey: '' }).search({ query: 'x', limit: 1 }, signal());
         expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
     });
 

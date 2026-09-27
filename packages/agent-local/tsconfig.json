@@ -50,6 +50,7 @@
     "./src/search/httpJson.ts",
     "./src/search/types.ts",
     "./src/search/openAlex.ts",
+    "./src/search/semanticScholar.ts",
     "./src/index.ts"
   ]
 }

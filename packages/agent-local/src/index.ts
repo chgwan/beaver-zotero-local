@@ -87,3 +87,8 @@ export type { HttpJsonOptions, HttpJsonResult, HostGateDeps } from './search/htt
 export { normalizeDoi } from './search/types';
 export type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource, SourceOutcome } from './search/types';
 export { createOpenAlexSource, OPENALEX_MIN_INTERVAL_MS, openAlexGate } from './search/openAlex';
+export {
+    createSemanticScholarSource,
+    SEMANTIC_SCHOLAR_MIN_INTERVAL_MS,
+    semanticScholarGate,
+} from './search/semanticScholar';
