@@ -19,6 +19,7 @@ import {
 } from "@beaver/agent-core/citations/atoms";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import { threadAgentActionsAtom } from "../agents/agentActions";
+import { isLocalMode } from "../atoms/localMode";
 import { threadNavigationSeqAtom } from "../atoms/threads";
 import { accountGenerationAtom } from "../atoms/profile";
 import { store } from "../store";
@@ -92,7 +93,9 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
         timer = undefined;
     };
     const schedule = () => {
+        // Local mode has no server thread to wait for.
         if (
+            isLocalMode() ||
             timer !== undefined ||
             running ||
             !store.get(serverThreadBlockedAtom) ||

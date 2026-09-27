@@ -19,6 +19,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from '../../atoms/ui';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
@@ -230,7 +231,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     // An offer to carry on from a run that ended unfinished — cut off, or
     // stopped waiting on a decision that never came. The backend composes it
     // and stores it on the run; only the newest run can carry one.
-    const continuation = useAtomValue(continuationOfferAtom);
+    // Continuing picks up a run on the server; local mode has none to continue.
+    const localMode = useAtomValue(localModeEnabledAtom);
+    const continuationOffer = useAtomValue(continuationOfferAtom);
+    const continuation = localMode ? null : continuationOffer;
     // That run is still sending its terminal frames (citations, agent
     // actions). Continuing opens a new connection, which closes the current
     // one, so the button waits while the rest of the run lands.

@@ -25,6 +25,7 @@ import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { activeAgentService } from '../runtime/localAgentService';
+import { isLocalMode } from './localMode';
 import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
@@ -858,7 +859,7 @@ async function startAutoRetryRunOwned(
             // truncate, but its runs still have to leave the local view.
             if (threadId) {
                 let persistedRunIds: Set<string> | undefined;
-                if (Zotero.Beaver?.presence) {
+                if (Zotero.Beaver?.presence && !isLocalMode()) {
                     const observed = get(threadAdmissionAtom);
                     const generation = getCredentialGeneration();
                     const writer = currentWriter();
@@ -893,7 +894,8 @@ async function startAutoRetryRunOwned(
                     .filter(run => !persistedRunIds || persistedRunIds.has(run.id));
                 const expectedTailRunId = survivingRuns.at(-1)?.id ?? null;
                 const persistedRemovals = runIdsToRemove.filter(id => !persistedRunIds || persistedRunIds.has(id));
-                const outcome = persistedRemovals.length ? await truncateThreadOnServer(
+                // Local mode persists nothing; the local removal is the truncation.
+                const outcome = persistedRemovals.length && !isLocalMode() ? await truncateThreadOnServer(
                     threadId,
                     persistedRemovals,
                     expectedTailRunId,
@@ -2923,7 +2925,7 @@ async function startRegenerateRunOwned(
         intendedRunIds.add(targetRun.id);
         const settlementThreadId =
             get(currentThreadIdAtom) || targetRun.thread_id;
-        if (settlementThreadId && Zotero.Beaver?.presence) {
+        if (settlementThreadId && Zotero.Beaver?.presence && !isLocalMode()) {
             setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
             const generation = getCredentialGeneration();
             const current = () =>
@@ -3111,7 +3113,9 @@ async function startRegenerateRunOwned(
                 .filter(run => !persistedRunIds || persistedRunIds.has(run.id));
             const expectedTailRunId = survivingRuns.at(-1)?.id ?? null;
             const persistedRemovals = runIdsToRemove.filter(id => !persistedRunIds || persistedRunIds.has(id));
-            const outcome = persistedRemovals.length ? await truncateThreadOnServer(
+            // Local mode persists nothing, so removing the runs from the local
+            // view below is the whole truncation.
+            const outcome = persistedRemovals.length && !isLocalMode() ? await truncateThreadOnServer(
                 threadId,
                 persistedRemovals,
                 expectedTailRunId,
@@ -3841,6 +3845,8 @@ export const sendBatchApprovalResponseAtom = atom(
 export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));
 
 async function startContinuationRun(get: Getter, set: Setter, failedRunId: string, options: StartContinuationRunOptions): Promise<void> {
+    // Continuing picks up a run on the server; local mode has none to continue.
+    if (isLocalMode()) return;
     return withThreadWriter(get, set, guardedSet => startContinuationRunOwned(get, guardedSet, failedRunId, options));
 }
 
@@ -3894,8 +3900,11 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
         return (set as any)(...args);
     }) as Setter;
     try {
+        // Local mode keeps no server copy of a thread, so there is no server
+        // tail to reconcile against.
         if (
             presence &&
+            !isLocalMode() &&
             id &&
             writer?.preparing === 1 &&
             (!get(activeRunAtom) || (!isRunActive(get(activeRunAtom)) &&

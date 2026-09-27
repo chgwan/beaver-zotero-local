@@ -10,6 +10,7 @@ import { parseTextWithLinksAndNewlines } from '../../utils/parseTextWithLinksAnd
 import { regenerateFromRunAtom, resumeFromRunAtom, retryPendingRunIdAtom } from '../../atoms/agentRunAtoms';
 import { runErrorVisibilityAtom, setRunErrorVisibilityAtom } from '../../atoms/messageUIState';
 import { remainingBeaverCreditsAtom, errorCreditCheckAtom } from '../../atoms/profile';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import { beaverDefaultModelAtom, updateSelectedModelAtom, type ModelConfig } from '../../atoms/models';
 import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
@@ -40,6 +41,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const threadReadOnly = useAtomValue(threadReadOnlyAtom);
     const regenerateFromRun = useSetAtom(regenerateFromRunAtom);
     const resumeFromRun = useSetAtom(resumeFromRunAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
     const hasCredits = remainingCredits > 0;
@@ -102,7 +104,8 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
     const headerTitle = getRunErrorTitle(error.type);
     const canTryWithBeaver = Boolean(error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded");
     const canGetBeaverCredits = Boolean((error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits);
-    const canResume = Boolean(error.is_resumable && isLastRun);
+    // Resuming continues a run on the server; local mode has none to continue.
+    const canResume = Boolean(error.is_resumable && isLastRun && !localMode);
     const canRetry = isLastRun;
     const primaryErrorAction = canResume
         ? 'resume'
