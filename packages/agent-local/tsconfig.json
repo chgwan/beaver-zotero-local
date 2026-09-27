@@ -48,6 +48,8 @@
     "./src/run/localAgentLoop.ts",
     "./src/run/runHistory.ts",
     "./src/search/httpJson.ts",
+    "./src/search/types.ts",
+    "./src/search/openAlex.ts",
     "./src/index.ts"
   ]
 }
