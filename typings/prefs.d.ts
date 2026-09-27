@@ -103,6 +103,8 @@ declare namespace _ZoteroTypes {
       "localScholarlySearch": boolean;
       "openAlexApiKey": string;
       "semanticScholarApiKey": string;
+      "localWebSearch": boolean;
+      "localWebSearchMaxUses": number;
     };
   }
 }

@@ -10,7 +10,12 @@ vi.mock('../../../src/utils/prefs', () => ({
 vi.mock('../../../react/utils/popupMessageUtils', () => ({ addPopupMessageAtom: {} }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { localAgentConfigInputAtom, localModeStatusAtom, localSearchConfigAtom } from '../../../react/atoms/localAgentConfig';
+import {
+    localAgentConfigInputAtom,
+    localModeStatusAtom,
+    localSearchConfigAtom,
+    localWebSearchStatusAtom,
+} from '../../../react/atoms/localAgentConfig';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { preferencesRevisionAtom } from '../../../react/atoms/preferences';
 
@@ -65,6 +70,8 @@ describe('localSearchConfigAtom', () => {
             scholarlySearch: true,
             openAlexApiKey: '',
             semanticScholarApiKey: '',
+            webSearch: false,
+            webSearchMaxUses: 3,
         });
 
         prefs.set('localScholarlySearch', false);
@@ -81,5 +88,64 @@ describe('localSearchConfigAtom', () => {
         prefs.set('openAlexApiKey', 'oa-2');
         store.set(preferencesRevisionAtom, 1);
         expect(store.get(localSearchConfigAtom).openAlexApiKey).toBe('oa-2');
+    });
+});
+
+describe('localSearchConfigAtom web search', () => {
+    beforeEach(() => {
+        prefs.clear();
+    });
+
+    it('reads the web search switch and a positive search limit', () => {
+        const store = createStore();
+        prefs.set('localWebSearch', true);
+        prefs.set('localWebSearchMaxUses', 5);
+        expect(store.get(localSearchConfigAtom)).toMatchObject({ webSearch: true, webSearchMaxUses: 5 });
+
+        prefs.set('localWebSearchMaxUses', 0);
+        store.set(preferencesRevisionAtom, 1);
+        expect(store.get(localSearchConfigAtom).webSearchMaxUses).toBe(3);
+    });
+});
+
+describe('localWebSearchStatusAtom', () => {
+    const anthropic = { name: 'Claude', snapshot: 'claude', api_key: 'k', api_base: 'https://api.anthropic.com', format: 'anthropic' as const };
+    const select = (store: ReturnType<typeof createStore>, model: unknown) =>
+        store.set(selectedModelAtom, { id: 'c', name: 'c', is_custom: true, custom_model: model } as any);
+
+    beforeEach(() => {
+        prefs.clear();
+    });
+
+    it('is off while the preference is off, whatever the provider', () => {
+        const store = createStore();
+        select(store, anthropic);
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'off', kind: 'anthropic' });
+    });
+
+    it('is available for an Anthropic or OpenRouter model once enabled', () => {
+        const store = createStore();
+        prefs.set('localWebSearch', true);
+        select(store, anthropic);
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'anthropic' });
+
+        select(store, { ...custom, api_base: 'https://openrouter.ai/api/v1' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'openrouter' });
+    });
+
+    it('is unsupported for providers without an available hosted search', () => {
+        const store = createStore();
+        prefs.set('localWebSearch', true);
+        select(store, custom);
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'unsupported', kind: null });
+
+        select(store, { ...custom, api_base: 'https://api.openai.com/v1' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'unsupported', kind: 'openai-responses' });
+    });
+
+    it('reports no model when the selection cannot run locally', () => {
+        const store = createStore();
+        prefs.set('localWebSearch', true);
+        expect(store.get(localWebSearchStatusAtom)).toMatchObject({ available: false, reason: 'no_model' });
     });
 });
