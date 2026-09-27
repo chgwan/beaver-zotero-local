@@ -3,9 +3,9 @@ import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon } from '../../icons/icons';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { 
+import {
   selectedModelAtom,
-  availableModelsAtom,
+  selectableModelsAtom,
   updateSelectedModelAtom,
   validateSelectedModelAtom,
 } from '../../../atoms/models';
@@ -76,7 +76,7 @@ const ModelSelectionButton: React.FC<{
     disabled?: boolean;
 }> = ({ inputRef, focusInput, disabled = false }) => {
     const selectedModel = useAtomValue(selectedModelAtom);
-    const availableModels = useAtomValue(availableModelsAtom);
+    const availableModels = useAtomValue(selectableModelsAtom);
     const liveRegionRef = useRef<HTMLDivElement | null>(null);
     const previousSelectedKeyRef = useRef<string | null>(null);
     const hasInitializedSelectionRef = useRef(false);

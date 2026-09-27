@@ -3,6 +3,7 @@ import { getPref, setPref } from '../../src/utils/prefs';
 import { getCustomChatModelsFromPreferences, CustomChatModel } from '../types/settings';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ProviderType, ReasoningEffort, AccessMode, ModelPricing, ModelConfig } from '@beaver/agent-core/types/models';
+import { localModeEnabledAtom } from './localMode';
 
 export type { ProviderType, ReasoningEffort, AccessMode, ModelPricing, ModelConfig };
 
@@ -133,6 +134,17 @@ export const availableModelsAtom = atom(
         });
     }
 );
+
+/**
+ * Models the selector may offer. In local mode there is no account, so a
+ * Beaver-hosted or BYOK entry is never connectable — and a stale hosted list
+ * left in memory from an earlier signed-in session must not appear either.
+ * Only custom providers are ever selectable in local mode.
+ */
+export const selectableModelsAtom = atom((get) => {
+    const models = get(availableModelsAtom);
+    return get(localModeEnabledAtom) ? models.filter((model) => model.is_custom) : models;
+});
 
 
 /**
