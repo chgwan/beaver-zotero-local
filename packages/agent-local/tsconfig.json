@@ -39,6 +39,7 @@
     "./src/llm/types.ts",
     "./src/llm/openAiClient.ts",
     "./src/llm/anthropicClient.ts",
+    "./src/llm/openAiResponsesClient.ts",
     "./src/llm/webSearchCapability.ts",
     "./src/llm/clientForFormat.ts",
     "./src/run/contextBudget.ts",
