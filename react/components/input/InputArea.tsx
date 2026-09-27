@@ -20,6 +20,8 @@ import { isLibraryTabAtom, isWebSearchAllowedAtom, isWebSearchEnabledAtom } from
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { selectedModelAtom, isUsingBeaverCreditsAtom } from '../../atoms/models';
 import { localModeEnabledAtom } from '../../atoms/localMode';
+import { localWebSearchStatusAtom } from '../../atoms/localAgentConfig';
+import { webSearchToggleCopy } from './webSearchToggleCopy';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
@@ -88,6 +90,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
+    const localWebSearchStatus = useAtomValue(localWebSearchStatusAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     // Only the oldest staged pill is claimable; the rest follow as it is
     // dequeued (see the claim effect below).
@@ -604,12 +607,14 @@ const InputArea: React.FC<InputAreaProps> = ({
         return "@ to add a source, / for actions, drag to add annotations";
     }
 
-    const webSearchTooltipContent = isWebSearchAllowed
-        ? (isWebSearchEnabled ? 'Stop requesting web search' : 'Request web search')
-        : 'Web search requires Beaver credits';
-    const webSearchDescription = isWebSearchAllowed
-        ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
-        : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
+    const webSearchCopy = webSearchToggleCopy({
+        localMode,
+        allowed: isWebSearchAllowed,
+        enabled: isWebSearchEnabled,
+        localReason: localWebSearchStatus.reason,
+    });
+    const webSearchTooltipContent = webSearchCopy.title;
+    const webSearchDescription = webSearchCopy.description;
     const menuPortalContainer = inputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window, #beaver-pane-floating-popup') as HTMLElement | null;
 
     return (
@@ -810,24 +815,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                         key={String(isWebSearchAllowed)}
                         content={webSearchTooltipContent}
                         padding={false}
-                        width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
+                        width={localMode || !isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
                         customContent={
-                            !isWebSearchAllowed ? (
-                                <div className="px-2 py-1 display-flex flex-col gap-1">
-                                    <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
-                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
-                                </div>
-                            ) : isWebSearchEnabled ? (
-                                <div className="px-2 py-1 display-flex flex-col gap-1">
-                                    <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
-                                    <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
-                                </div>
-                            ) : (
-                                <div className="px-2 py-1 display-flex flex-col gap-1">
-                                    <span className="text-base font-color-secondary font-medium">Request web search</span>
-                                    <span className="text-sm font-color-tertiary">May search the web either way</span>
-                                </div>
-                            )
+                            <div className="px-2 py-1 display-flex flex-col gap-1">
+                                <span className="text-base font-color-secondary font-medium">{webSearchCopy.title}</span>
+                                <span className="text-sm font-color-tertiary">{webSearchCopy.detail}</span>
+                            </div>
                         }
                     >
                         <IconButton
