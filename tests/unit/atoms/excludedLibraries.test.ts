@@ -7,10 +7,18 @@ const { updateExcludedLibrariesMock, popupMessages } = vi.hoisted(() => ({
     updateExcludedLibrariesMock: vi.fn(),
     popupMessages: [] as any[],
 }));
+const localPrefs = vi.hoisted(() => ({ value: undefined as string | undefined }));
 
 vi.mock('@beaver/agent-core/transport/clients/accountService', () => ({
     accountService: {
         updateExcludedLibraries: updateExcludedLibrariesMock,
+    },
+}));
+
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: () => localPrefs.value,
+    setPref: (_key: string, value: string) => {
+        localPrefs.value = value;
     },
 }));
 
@@ -39,7 +47,7 @@ import {
     profileProjectionAtom as profileWithPlanAtom,
     searchableLibraryIdsAtom,
 } from '../../../react/atoms/profile';
-import { toggleExcludedLibraryAtom, isUpdatingExcludedLibrariesAtom } from '../../../react/atoms/excludedLibraries';
+import { toggleExcludedLibraryAtom, isUpdatingExcludedLibrariesAtom, nextExcludedLibraries } from '../../../react/atoms/excludedLibraries';
 
 function library(overrides: Partial<ZoteroLibrary>): ZoteroLibrary {
     return {
@@ -278,5 +286,41 @@ describe('toggleExcludedLibraryAtom', () => {
         await pending;
         expect(store.get(isUpdatingExcludedLibrariesAtom)).toBe(false);
         expect(popupMessages).toEqual([expect.objectContaining({type: 'error'})]);
+    });
+});
+
+describe('nextExcludedLibraries', () => {
+    it('adds a library not already excluded', () => {
+        expect(nextExcludedLibraries([], library({ library_id: 1 }))).toEqual([{ type: 'user' }]);
+    });
+
+    it('removes a library already excluded, preserving entries absent from this device', () => {
+        const absent = { type: 'group' as const, group_id: 999 };
+        expect(nextExcludedLibraries([{ type: 'user' }, absent], library({ library_id: 1 }))).toEqual([absent]);
+    });
+});
+
+describe('toggleExcludedLibraryAtom in local mode', () => {
+    beforeEach(() => {
+        Zotero.Beaver = { ...(Zotero.Beaver as any), localMode: true } as any;
+        localPrefs.value = undefined;
+        popupMessages.length = 0;
+        updateExcludedLibrariesMock.mockReset();
+    });
+
+    it('writes the toggled library to the local exclusion preference instead of calling the account', async () => {
+        const store = createStore();
+        await store.set(toggleExcludedLibraryAtom, library({ library_id: 42, group_id: 123, is_group: true, type: 'group' }));
+
+        expect(localPrefs.value).toBe(JSON.stringify([{ type: 'group', group_id: 123 }]));
+        expect(updateExcludedLibrariesMock).not.toHaveBeenCalled();
+    });
+
+    it('toggles a library back off, preserving other pending entries', async () => {
+        localPrefs.value = JSON.stringify([{ type: 'user' }, { type: 'group', group_id: 999 }]);
+        const store = createStore();
+        await store.set(toggleExcludedLibraryAtom, library({ library_id: 1 }));
+
+        expect(localPrefs.value).toBe(JSON.stringify([{ type: 'group', group_id: 999 }]));
     });
 });
