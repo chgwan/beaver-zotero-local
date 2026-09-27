@@ -24,8 +24,8 @@ import {
     RockPaperScissorsTestResult,
 } from "@beaver/agent-core/transport/clients/chatService";
 import { localModeEnabledAtom } from "../../atoms/localMode";
-import { clientForFormat } from "@beaver/agent-local/llm/clientForFormat";
-import { testLocalProvider } from "./localProviderTest";
+import { isLoopbackEndpoint } from "@beaver/agent-local/config/localAgentConfig";
+import { plainHttpWarning, testLocalEndpoint } from "./localProviderTest";
 import { LocalProviderTestRunner } from "./localProviderTestRunner";
 
 interface CustomProviderCardProps {
@@ -127,7 +127,10 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     const hasName = !!model.name?.trim();
     const hasSnapshot = !!model.snapshot?.trim();
     const hasApiKey = !!model.api_key?.trim();
-    const isComplete = hasName && hasSnapshot && hasApiKey && apiBaseValidation.valid;
+    // Local mode lets a server on this machine run without a key.
+    const apiKeyOptional = localMode && isLoopbackEndpoint(model.api_base);
+    const isComplete = hasName && hasSnapshot && (hasApiKey || apiKeyOptional) && apiBaseValidation.valid;
+    const httpWarning = localMode && apiBaseValidation.valid ? plainHttpWarning(model.api_base) : null;
 
     // --- Test endpoint (hosted: rock-paper-scissors through the backend) ---
     const runTest = useCallback(async (userMove: RockPaperScissorsMove) => {
@@ -167,9 +170,10 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         setTestStatus('loading');
         setLocalTestMessage(null);
         setTestError(null);
-        const client = clientForFormat(model.format === 'anthropic' ? 'anthropic' : 'openai');
-        const result = await testLocalProvider(
+        // Resolved like a chat run's model, so the test and a chat agree.
+        const result = await testLocalEndpoint(
             {
+                provider: model.provider,
                 api_base: model.api_base?.trim() || undefined,
                 format: model.format === 'anthropic' ? 'anthropic' : 'openai',
                 api_key: model.api_key?.trim() ?? '',
@@ -178,8 +182,6 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 context_window: model.context_window,
                 supports_vision: model.supports_vision,
             },
-            client,
-            undefined,
             signal,
         );
         // Discard a result that arrived after unmount or after a newer test superseded this one.
@@ -324,6 +326,12 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             </span>
                         </span>
                     )}
+                    {httpWarning && (
+                        <span className="display-flex flex-row items-start text-sm" style={{ color: 'var(--tag-orange-secondary)' }}>
+                            <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 mr-1" />
+                            <span>{httpWarning}</span>
+                        </span>
+                    )}
                 </label>
 
                 {/* Format + Context window row */}
@@ -369,7 +377,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             type="password"
                             value={model.api_key}
                             onChange={(e) => update({ api_key: e.target.value })}
-                            placeholder="sk-..."
+                            placeholder={apiKeyOptional ? "Optional for a server on this computer" : "sk-..."}
                             aria-label="API key"
                             className="chat-input text-base font-color-primary flex-1 min-w-0"
                         />
