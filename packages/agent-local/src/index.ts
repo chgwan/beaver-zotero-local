@@ -35,12 +35,27 @@ export type { SseEvent } from './llm/sseReader';
 export { ToolCallAccumulator, wireArguments } from './llm/toolCallAccumulator';
 export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
 export { createOpenAiClient } from './llm/openAiClient';
-export { createAnthropicClient, ANTHROPIC_VERSION, ANTHROPIC_DEFAULT_MAX_TOKENS } from './llm/anthropicClient';
+export {
+    createAnthropicClient,
+    ANTHROPIC_VERSION,
+    ANTHROPIC_DEFAULT_MAX_TOKENS,
+    ANTHROPIC_WEB_SEARCH_TOOL,
+    ANTHROPIC_WEB_SEARCH_TOOL_BASIC,
+} from './llm/anthropicClient';
 export { clientForFormat } from './llm/clientForFormat';
 export { supportsHostedWebSearch, isHostedWebSearchAvailable } from './llm/webSearchCapability';
 export type { HostedWebSearchKind } from './llm/webSearchCapability';
-export { LlmRequestError, classifyHttpStatus, providerErrorMessage, joinEndpoint } from './llm/types';
+export {
+    LlmRequestError,
+    addCitation,
+    classifyHttpStatus,
+    joinEndpoint,
+    namesWebSearchTool,
+    providerErrorMessage,
+    webSearchUnsupportedError,
+} from './llm/types';
 export type {
+    LlmCitation,
     LlmClient,
     LlmMessage,
     LlmStreamHandlers,
@@ -49,6 +64,7 @@ export type {
     LlmTurnRequest,
     LlmErrorKind,
     LlmUsage,
+    LlmWebSearchOptions,
 } from './llm/types';
 export { FrameEmitter } from './run/frameEmitter';
 export type {

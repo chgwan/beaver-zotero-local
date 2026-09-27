@@ -6,15 +6,25 @@
  * with a version header, and content arrives as indexed blocks whose deltas are
  * typed. Tool input streams as `input_json_delta.partial_json`, reassembled by
  * the shared accumulator keyed on the block index.
+ *
+ * With hosted web search enabled, the provider runs searches inside the turn:
+ * `server_tool_use` and `web_search_tool_result` blocks arrive alongside text,
+ * cited text carries `citations_delta` events, and a long turn may end with
+ * `pause_turn`. Such a turn is also returned as raw content blocks, because
+ * the provider only accepts it back unchanged.
  */
 
 import { readSseEvents } from './sseReader';
 import { ToolCallAccumulator } from './toolCallAccumulator';
 import {
     LlmRequestError,
+    addCitation,
     classifyHttpStatus,
     joinEndpoint,
+    namesWebSearchTool,
     providerErrorMessage,
+    webSearchUnsupportedError,
+    type LlmCitation,
     type LlmClient,
     type LlmFinishReason,
     type LlmMessage,
@@ -30,12 +40,104 @@ export const ANTHROPIC_VERSION = '2023-06-01';
 /** `max_tokens` is required by the API, so a default is not optional. */
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192;
 
+/**
+ * Hosted web search server tool versions, as documented at
+ * https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+ *
+ * `web_search_20260209` adds dynamic filtering (the provider filters results
+ * with code execution before they reach the context) on recent models.
+ * `web_search_20250305` is the basic tool every web-search-capable model and
+ * platform accepts. The newer one is tried first; a 400 that names its type,
+ * or asks for `allowed_callers` (a model without programmatic tool calling),
+ * is retried once with the basic one. Searches are billed per search by the
+ * provider, on top of tokens.
+ */
+export const ANTHROPIC_WEB_SEARCH_TOOL = 'web_search_20260209';
+export const ANTHROPIC_WEB_SEARCH_TOOL_BASIC = 'web_search_20250305';
+
 const mapStopReason = (reason: string | null | undefined): LlmFinishReason => {
     if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
     if (reason === 'tool_use') return 'tool_calls';
     if (reason === 'max_tokens') return 'length';
+    // A long hosted-search turn paused server-side; resending it continues.
+    if (reason === 'pause_turn') return 'pause';
     return 'unknown';
 };
+
+/** Block types this client can rebuild from `content` and `toolCalls` alone. */
+const PLAIN_BLOCK_TYPES = new Set(['text', 'tool_use', 'thinking', 'redacted_thinking']);
+
+/** User-facing copy for a `web_search_tool_result_error` code. */
+const webSearchErrorMessage = (code: unknown): string => {
+    if (code === 'max_uses_exceeded') return 'Web search reached its search limit for this turn.';
+    if (code === 'too_many_requests') return 'Web search was rate limited by the provider.';
+    return `Web search failed (${typeof code === 'string' ? code : 'unknown error'}).`;
+};
+
+const parseJsonObject = (text: string): Record<string, unknown> => {
+    if (!text.trim()) return {};
+    try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+        return {};
+    }
+};
+
+/**
+ * Rebuilds a turn's content blocks from the stream, so a turn with
+ * server-side content can be sent back exactly as it was received.
+ */
+class ContentBlockRecorder {
+    private readonly blocks = new Map<number, Record<string, any>>();
+    private readonly inputText = new Map<number, string>();
+
+    start(index: number, block: Record<string, any>): void {
+        this.blocks.set(index, { ...block });
+    }
+
+    delta(index: number, delta: Record<string, any>): void {
+        const block = this.blocks.get(index);
+        if (!block) return;
+        if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            block.text = (block.text ?? '') + delta.text;
+        } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            block.thinking = (block.thinking ?? '') + delta.thinking;
+        } else if (delta.type === 'signature_delta' && typeof delta.signature === 'string') {
+            block.signature = delta.signature;
+        } else if (delta.type === 'citations_delta' && delta.citation) {
+            block.citations = [...(Array.isArray(block.citations) ? block.citations : []), delta.citation];
+        } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+            this.inputText.set(index, (this.inputText.get(index) ?? '') + delta.partial_json);
+        }
+    }
+
+    /**
+     * The blocks in index order, or undefined when every block is one this
+     * client rebuilds on its own (plain text without citations, local tool
+     * calls, reasoning).
+     */
+    close(): unknown[] | undefined {
+        const indices = [...this.blocks.keys()].sort((a, b) => a - b);
+        const blocks: Record<string, any>[] = [];
+        let needsReplay = false;
+        for (const index of indices) {
+            const block = this.blocks.get(index)!;
+            const input = this.inputText.get(index);
+            if (input !== undefined) block.input = parseJsonObject(input);
+            if (block.type === 'text') {
+                if (!Array.isArray(block.citations) || block.citations.length === 0) delete block.citations;
+                // The API rejects an empty text block.
+                if (!block.text && !block.citations) continue;
+                if (block.citations) needsReplay = true;
+            } else if (!PLAIN_BLOCK_TYPES.has(block.type)) {
+                needsReplay = true;
+            }
+            blocks.push(block);
+        }
+        return needsReplay ? blocks : undefined;
+    }
+}
 
 const isAbortError = (error: unknown): boolean =>
     error instanceof Error && error.name === 'AbortError';
@@ -80,6 +182,13 @@ const buildMessages = (
     for (const message of messages) {
         if (message.role === 'system') {
             systemParts.push(message.content);
+            continue;
+        }
+
+        // Server-side content (hosted search calls, encrypted results, cited
+        // text) is only valid if sent back unchanged.
+        if (message.role === 'assistant' && message.providerBlocks?.length) {
+            translated.push({ role: 'assistant', content: [...message.providerBlocks] });
             continue;
         }
 
@@ -139,6 +248,10 @@ const buildMessages = (
 };
 
 export function createAnthropicClient(): LlmClient {
+    // Once the basic web search version was needed, later turns of the same
+    // client use it directly: no repeated rejected request, and a paused turn
+    // is continued with the same tool it started with.
+    let webSearchToolType = ANTHROPIC_WEB_SEARCH_TOOL;
     return {
         async streamTurn(
             request: LlmTurnRequest,
@@ -147,62 +260,96 @@ export function createAnthropicClient(): LlmClient {
         ): Promise<LlmTurnResult> {
             const { model, messages, tools } = request;
             const { system, wire } = buildMessages(messages);
+            const webSearch = request.webSearch?.enabled ? request.webSearch : null;
 
-            const payload: Record<string, unknown> = {
-                model: model.snapshot,
-                stream: true,
-                max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
-                messages: wire,
+            const localTools = tools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.parameters,
+            }));
+            const buildPayload = (webSearchTool: string | null): Record<string, unknown> => {
+                const payload: Record<string, unknown> = {
+                    model: model.snapshot,
+                    stream: true,
+                    max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+                    messages: wire,
+                };
+                if (system) payload.system = system;
+                const allTools: Record<string, unknown>[] = [...localTools];
+                if (webSearchTool) {
+                    const maxUses = webSearch?.maxUses;
+                    allTools.push({
+                        type: webSearchTool,
+                        name: 'web_search',
+                        ...(maxUses && Number.isInteger(maxUses) && maxUses > 0 ? { max_uses: maxUses } : {}),
+                    });
+                }
+                if (allTools.length > 0) {
+                    payload.tools = allTools;
+                    if (request.toolChoice === 'none') payload.tool_choice = { type: 'none' };
+                }
+                return payload;
             };
-            if (system) payload.system = system;
-            if (tools.length > 0) {
-                payload.tools = tools.map((tool) => ({
-                    name: tool.name,
-                    description: tool.description,
-                    input_schema: tool.parameters,
-                }));
-                if (request.toolChoice === 'none') payload.tool_choice = { type: 'none' };
-            }
 
             const url = joinEndpoint(stripTrailingV1(model.api_base ?? ''), 'v1/messages');
 
-            let response: Response;
-            try {
-                response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        // A keyless local server gets no auth header at all.
-                        ...(model.api_key?.trim() ? { 'x-api-key': model.api_key } : {}),
-                        'anthropic-version': ANTHROPIC_VERSION,
-                        // A privileged Gecko `fetch` can still attach an `Origin`
-                        // header, which Anthropic's browser-key check would
-                        // otherwise reject; this request always carries the
-                        // user's own key from a trusted context, so opting out
-                        // of that check has no downside here.
-                        'anthropic-dangerous-direct-browser-access': 'true',
-                    },
-                    body: JSON.stringify(payload),
-                    signal,
-                });
-            } catch (error) {
-                if (signal.aborted || isAbortError(error)) {
-                    throw new LlmRequestError('cancelled', 'The request was cancelled.');
+            const post = async (payload: Record<string, unknown>): Promise<Response> => {
+                try {
+                    return await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            // A keyless local server gets no auth header at all.
+                            ...(model.api_key?.trim() ? { 'x-api-key': model.api_key } : {}),
+                            'anthropic-version': ANTHROPIC_VERSION,
+                            // A privileged Gecko `fetch` can still attach an `Origin`
+                            // header, which Anthropic's browser-key check would
+                            // otherwise reject; this request always carries the
+                            // user's own key from a trusted context, so opting out
+                            // of that check has no downside here.
+                            'anthropic-dangerous-direct-browser-access': 'true',
+                        },
+                        body: JSON.stringify(payload),
+                        signal,
+                    });
+                } catch (error) {
+                    if (signal.aborted || isAbortError(error)) {
+                        throw new LlmRequestError('cancelled', 'The request was cancelled.');
+                    }
+                    throw new LlmRequestError(
+                        'network',
+                        `Could not reach ${url}: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    );
                 }
-                throw new LlmRequestError(
-                    'network',
-                    `Could not reach ${url}: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`
-                );
+            };
+
+            const readError = async (failed: Response): Promise<string> => {
+                const body = await failed.text().catch(() => '');
+                return providerErrorMessage(body, `${failed.status} ${failed.statusText}`);
+            };
+
+            let response = await post(buildPayload(webSearch ? webSearchToolType : null));
+            let errorMessage = response.ok ? null : await readError(response);
+            if (
+                webSearch &&
+                webSearchToolType !== ANTHROPIC_WEB_SEARCH_TOOL_BASIC &&
+                response.status === 400 &&
+                errorMessage !== null &&
+                (errorMessage.includes(webSearchToolType) || errorMessage.includes('allowed_callers'))
+            ) {
+                response = await post(buildPayload(ANTHROPIC_WEB_SEARCH_TOOL_BASIC));
+                errorMessage = response.ok ? null : await readError(response);
+                if (response.ok) webSearchToolType = ANTHROPIC_WEB_SEARCH_TOOL_BASIC;
             }
 
             if (!response.ok) {
-                const body = await response.text().catch(() => '');
-                throw new LlmRequestError(
-                    classifyHttpStatus(response.status),
-                    providerErrorMessage(body, `${response.status} ${response.statusText}`)
-                );
+                const message = errorMessage ?? `${response.status} ${response.statusText}`;
+                if (webSearch && response.status === 400 && namesWebSearchTool(message)) {
+                    throw webSearchUnsupportedError(message);
+                }
+                throw new LlmRequestError(classifyHttpStatus(response.status), message);
             }
             if (!response.body) {
                 throw new LlmRequestError('server', 'The provider returned no response body.');
@@ -218,6 +365,8 @@ export function createAnthropicClient(): LlmClient {
             // this client doesn't recognize as `tool_use` is dropped rather
             // than turning into a phantom call with an empty name.
             const blockTypes = new Map<number, string>();
+            const recorder = new ContentBlockRecorder();
+            const citations: LlmCitation[] = [];
             let text = '';
             let thinking = '';
             let finishReason: LlmFinishReason = 'unknown';
@@ -255,8 +404,19 @@ export function createAnthropicClient(): LlmClient {
                     const block = frame.content_block ?? {};
                     const index = frame.index ?? 0;
                     blockTypes.set(index, block.type);
+                    recorder.start(index, block);
                     if (block.type === 'tool_use') {
                         accumulator.open(index, { id: block.id, name: block.name });
+                    }
+                    // A hosted search that failed still returns 200: its
+                    // result block carries an error object instead of a list,
+                    // and the model carries on without it.
+                    if (
+                        block.type === 'web_search_tool_result' &&
+                        block.content &&
+                        !Array.isArray(block.content)
+                    ) {
+                        handlers.onWarning?.(webSearchErrorMessage(block.content.error_code));
                     }
                     continue;
                 }
@@ -264,6 +424,10 @@ export function createAnthropicClient(): LlmClient {
                 if (type === 'content_block_delta') {
                     const index = frame.index ?? 0;
                     const delta = frame.delta ?? {};
+                    recorder.delta(index, delta);
+                    if (delta.type === 'citations_delta') {
+                        addCitation(citations, delta.citation?.url, delta.citation?.title);
+                    }
                     // `text_delta`/`thinking_delta` are already scoped to their
                     // block type by the Anthropic protocol itself — unlike
                     // `input_json_delta`, no other block type emits them — so
@@ -316,7 +480,16 @@ export function createAnthropicClient(): LlmClient {
                     ? { inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0 }
                     : null;
 
-            return { text, thinking, toolCalls, finishReason, usage };
+            const providerBlocks = recorder.close();
+            return {
+                text,
+                thinking,
+                toolCalls,
+                finishReason,
+                usage,
+                ...(citations.length > 0 ? { citations } : {}),
+                ...(providerBlocks ? { providerBlocks } : {}),
+            };
         },
     };
 }

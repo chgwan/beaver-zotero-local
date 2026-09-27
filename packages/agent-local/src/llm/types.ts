@@ -17,6 +17,20 @@ export interface LlmMessage {
     toolCalls?: AccumulatedToolCall[];
     /** Present on a tool result, naming the call it answers. */
     toolCallId?: string;
+    /**
+     * An assistant turn exactly as the provider returned it, for a provider
+     * that requires server-side content (hosted search calls, their encrypted
+     * results, cited text) to be sent back unchanged. When present, a client
+     * that understands it replays these blocks instead of `content` and
+     * `toolCalls`; other clients ignore it.
+     */
+    providerBlocks?: unknown[];
+}
+
+/** A source the provider's hosted web search cited. */
+export interface LlmCitation {
+    url: string;
+    title: string;
 }
 
 export interface LlmStreamHandlers {
@@ -24,9 +38,18 @@ export interface LlmStreamHandlers {
     onTextDelta(fullText: string): void;
     /** Called with the full reasoning text accumulated so far. */
     onThinkingDelta(fullText: string): void;
+    /**
+     * A non-fatal problem the user should know about, such as a hosted search
+     * that failed while the turn itself went on.
+     */
+    onWarning?(message: string): void;
 }
 
-export type LlmFinishReason = 'stop' | 'tool_calls' | 'length' | 'unknown';
+/**
+ * `'pause'`: the provider paused a long server-side turn (hosted search) and
+ * expects the same request again with the partial turn appended, to continue.
+ */
+export type LlmFinishReason = 'stop' | 'tool_calls' | 'length' | 'pause' | 'unknown';
 
 /** Token accounting for one turn, in the provider-neutral shape the loop sums. */
 export interface LlmUsage {
@@ -41,6 +64,17 @@ export interface LlmTurnResult {
     finishReason: LlmFinishReason;
     /** Null when the provider never reported usage for this turn. */
     usage: LlmUsage | null;
+    /** Sources cited by hosted web search in this turn, unique by URL. */
+    citations?: LlmCitation[];
+    /** See `LlmMessage.providerBlocks`; set only when the turn needs it. */
+    providerBlocks?: unknown[];
+}
+
+/** Hosted web search for one turn. */
+export interface LlmWebSearchOptions {
+    enabled: boolean;
+    /** Upper bound on searches in one provider request, where supported. */
+    maxUses?: number;
 }
 
 export interface LlmTurnRequest {
@@ -53,6 +87,11 @@ export interface LlmTurnRequest {
      * letting the model choose.
      */
     toolChoice?: 'auto' | 'none';
+    /**
+     * Ask the provider to run its own hosted web search. A client whose
+     * provider has none adds nothing.
+     */
+    webSearch?: LlmWebSearchOptions;
 }
 
 export interface LlmClient {
@@ -104,6 +143,27 @@ export function providerErrorMessage(body: string, fallback: string): string {
         // Not JSON; fall through to the raw body.
     }
     return body.trim().length > 0 ? body.trim().slice(0, 500) : fallback;
+}
+
+/** Whether a provider error message is about the hosted web search tool. */
+export function namesWebSearchTool(message: string): boolean {
+    return /web[_ ]?search|server[_ ]tool|allowed_callers/i.test(message);
+}
+
+/** The error for a provider that rejected its hosted web search tool. */
+export function webSearchUnsupportedError(providerMessage: string): LlmRequestError {
+    return new LlmRequestError(
+        'bad_request',
+        'Web search is not available for this provider or model. ' +
+            `Turn off web search for this message and try again. (${providerMessage})`
+    );
+}
+
+/** Add a citation unless one with the same URL is already listed. */
+export function addCitation(citations: LlmCitation[], url: unknown, title: unknown): void {
+    if (typeof url !== 'string' || url.length === 0) return;
+    if (citations.some((existing) => existing.url === url)) return;
+    citations.push({ url, title: typeof title === 'string' && title.trim() ? title.trim() : url });
 }
 
 /** Join an endpoint base and a path without doubling the separator. */
