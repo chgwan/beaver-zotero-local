@@ -12,11 +12,11 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/jlegewie/beaver-zotero.git"
+        "url": "git+https://github.com/chgwan/beaver-zotero.git"
     },
     "author": "JL",
     "bugs": {
-        "url": "https://github.com/jlegewie/beaver-zotero/issues"
+        "url": "https://github.com/chgwan/beaver-zotero/issues"
     },
     "homepage": "https://www.beaverapp.ai",
     "license": "AGPL-3.0-or-later",
