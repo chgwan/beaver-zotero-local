@@ -51,3 +51,13 @@ export type {
     RoundFrames,
     SealedToolReturn,
 } from './run/frameEmitter';
+export { runLocalAgentLoop } from './run/localAgentLoop';
+export type { LocalAgentLoopOptions } from './run/localAgentLoop';
+export { buildSystemPrompt } from './run/systemPrompt';
+export type { SystemPromptOptions } from './run/systemPrompt';
+export { buildToolReturnMetadata } from './run/toolReturnMetadata';
+export type {
+    ToolReturnMetadata,
+    ItemSearchSummary,
+    AnnotationListSummary,
+} from './run/toolReturnMetadata';
