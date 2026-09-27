@@ -94,18 +94,19 @@ describe('buildRunHistory', () => {
         expect(history[2]).toEqual({ role: 'tool', content: 'Library not searchable.', toolCallId: 'c1' });
     });
 
-    it('parses string arguments and falls back to empty args when they do not parse', () => {
+    it('parses string arguments and replays unparseable ones as an empty JSON object', () => {
         const runs = [
             run('r1', 'q', [
-                response('r1', [call('c1', '{"query":"a"}'), call('c2', '{not json')]),
-                request('r1', [ret('c1', {}), ret('c2', {})]),
+                response('r1', [call('c1', '{"query":"a"}'), call('c2', '{not json'), call('c3', '[1,2]')]),
+                request('r1', [ret('c1', {}), ret('c2', {}), ret('c3', {})]),
             ]),
         ];
 
         const [, assistant] = buildRunHistory(runs, 'thread-1');
         expect(assistant.toolCalls).toEqual([
             { id: 'c1', name: 'search_items', args: { query: 'a' }, rawArgs: '{"query":"a"}', parseError: null },
-            { id: 'c2', name: 'search_items', args: {}, rawArgs: '{not json', parseError: null },
+            { id: 'c2', name: 'search_items', args: {}, rawArgs: '{}', parseError: null },
+            { id: 'c3', name: 'search_items', args: {}, rawArgs: '{}', parseError: null },
         ]);
     });
 

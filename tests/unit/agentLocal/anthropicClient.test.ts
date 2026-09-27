@@ -222,6 +222,41 @@ describe('createAnthropicClient', () => {
         });
     });
 
+    it('replays a call whose arguments did not parse as an empty input object', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'hi' },
+                    {
+                        role: 'assistant',
+                        content: '',
+                        toolCalls: [
+                            {
+                                id: 'toolu_1',
+                                name: 'zotero_search',
+                                args: {},
+                                rawArgs: '{"query": "unterminated',
+                                parseError: 'Tool arguments were not valid JSON',
+                            },
+                        ],
+                    },
+                    { role: 'tool', content: 'not run', toolCallId: 'toolu_1' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(sent.messages[1].content[0]).toEqual({
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'zotero_search',
+            input: {},
+        });
+    });
+
     it('merges consecutive tool results into one user message', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
         vi.stubGlobal('fetch', fetchMock);

@@ -40,14 +40,19 @@ export function estimateTokens(messages: readonly LlmMessage[]): number {
     return Math.ceil(chars / 4);
 }
 
+/**
+ * A stored call's arguments, replayable as-is. Arguments that were not a JSON
+ * object when the model sent them (the call was refused, never run) replay as
+ * `{}`: strict servers reject a transcript with invalid tool-call arguments.
+ */
 function toolCallArgs(part: ToolCallPart): { args: Record<string, unknown>; rawArgs: string } {
     if (isRecord(part.args)) return { args: part.args, rawArgs: JSON.stringify(part.args) };
     if (typeof part.args === 'string') {
         try {
             const parsed: unknown = JSON.parse(part.args);
-            return { args: isRecord(parsed) ? parsed : {}, rawArgs: part.args };
+            if (isRecord(parsed)) return { args: parsed, rawArgs: part.args };
         } catch {
-            return { args: {}, rawArgs: part.args };
+            // Replayed as an empty object below.
         }
     }
     return { args: {}, rawArgs: '{}' };

@@ -8,7 +8,7 @@
  */
 
 import { readSseEvents } from './sseReader';
-import { ToolCallAccumulator } from './toolCallAccumulator';
+import { ToolCallAccumulator, wireArguments } from './toolCallAccumulator';
 import {
     LlmRequestError,
     classifyHttpStatus,
@@ -34,9 +34,7 @@ const wireMessage = (message: LlmMessage): Record<string, unknown> => {
             tool_calls: message.toolCalls.map((call) => ({
                 id: call.id,
                 type: 'function',
-                // Send back exactly what the provider streamed, so a request
-                // the model can already see is never reworded by us.
-                function: { name: call.name, arguments: call.rawArgs || '{}' },
+                function: { name: call.name, arguments: wireArguments(call) },
             })),
         };
     }
