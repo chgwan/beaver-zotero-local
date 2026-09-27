@@ -12,12 +12,16 @@ import { OPENROUTER_API_BASE, type CustomChatModel } from '@beaver/agent-core/ty
  * - `anthropic`: the Messages API `web_search` server tool.
  * - `openrouter`: OpenRouter's `openrouter:web_search` server tool.
  * - `openai-responses`: OpenAI's hosted `web_search` tool, which exists only
- *   in the Responses API, not in the Chat Completions API this package speaks.
+ *   in the Responses API; runs that use it go through the Responses client.
  */
 export type HostedWebSearchKind = 'anthropic' | 'openrouter' | 'openai-responses';
 
 /** The kinds this package can currently send a request for. */
-const AVAILABLE_KINDS: ReadonlySet<HostedWebSearchKind> = new Set<HostedWebSearchKind>(['anthropic', 'openrouter']);
+const AVAILABLE_KINDS: ReadonlySet<HostedWebSearchKind> = new Set<HostedWebSearchKind>([
+    'anthropic',
+    'openrouter',
+    'openai-responses',
+]);
 
 const hostOf = (apiBase: string): string | null => {
     try {

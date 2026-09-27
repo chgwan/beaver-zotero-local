@@ -33,7 +33,7 @@ import { resolveDefaultAgentDataProvider } from '@beaver/agent-core/transport/ag
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLocalAgentConfig } from '@beaver/agent-local/config/localAgentConfig';
-import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
+import { clientForRun } from '@beaver/agent-local/llm/clientForFormat';
 import type { LlmWebSearchOptions } from '@beaver/agent-local/llm/types';
 import { isHostedWebSearchAvailable } from '@beaver/agent-local/llm/webSearchCapability';
 import { runLocalAgentLoop } from '@beaver/agent-local/run/localAgentLoop';
@@ -175,7 +175,7 @@ export class LocalAgentService {
             userPrompt,
             history,
             config,
-            client: clientForFormat(config.model.format ?? 'openai'),
+            client: clientForRun(config.model, webSearch),
             catalog,
             callbacks: forwarded,
             signal: run.controller.signal,

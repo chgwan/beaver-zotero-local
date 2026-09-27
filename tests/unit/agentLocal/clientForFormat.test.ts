@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
+import { clientForFormat, clientForRun } from '@beaver/agent-local/llm/clientForFormat';
 
 const anthropicModel = {
     name: 'Claude',
@@ -62,5 +62,52 @@ describe('clientForFormat', () => {
         const [url, init] = fetchMock.mock.calls[0];
         expect(url).toBe('https://api.openai.com/v1/chat/completions');
         expect(init.headers.Authorization).toBe('Bearer sk-test');
+    });
+});
+
+describe('clientForRun', () => {
+    const urlOf = async (client: ReturnType<typeof clientForRun>, model: any, webSearch?: { enabled: boolean }) => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse());
+        vi.stubGlobal('fetch', fetchMock);
+        await client.streamTurn(
+            { model, messages: [{ role: 'user', content: 'hi' }], tools: [], ...(webSearch ? { webSearch } : {}) },
+            handlers(),
+            signal()
+        );
+        return fetchMock.mock.calls[0][0];
+    };
+
+    it('uses the Responses API for an api.openai.com run with web search on', async () => {
+        const webSearch = { enabled: true };
+        expect(await urlOf(clientForRun(openAiModel, webSearch), openAiModel, webSearch)).toBe(
+            'https://api.openai.com/v1/responses'
+        );
+    });
+
+    it('keeps Chat Completions for an api.openai.com run without web search', async () => {
+        expect(await urlOf(clientForRun(openAiModel), openAiModel)).toBe('https://api.openai.com/v1/chat/completions');
+        const off = { enabled: false };
+        expect(await urlOf(clientForRun(openAiModel, off), openAiModel, off)).toBe(
+            'https://api.openai.com/v1/chat/completions'
+        );
+    });
+
+    it('keeps Chat Completions for other OpenAI-format hosts even with web search on', async () => {
+        const webSearch = { enabled: true };
+        const openRouter = { ...openAiModel, api_base: 'https://openrouter.ai/api/v1' };
+        expect(await urlOf(clientForRun(openRouter, webSearch), openRouter, webSearch)).toBe(
+            'https://openrouter.ai/api/v1/chat/completions'
+        );
+        const localServer = { ...openAiModel, api_base: 'http://localhost:11434/v1' };
+        expect(await urlOf(clientForRun(localServer, webSearch), localServer, webSearch)).toBe(
+            'http://localhost:11434/v1/chat/completions'
+        );
+    });
+
+    it('uses the Anthropic client for an Anthropic model', async () => {
+        const webSearch = { enabled: true };
+        expect(await urlOf(clientForRun(anthropicModel, webSearch), anthropicModel, webSearch)).toBe(
+            'https://api.anthropic.com/v1/messages'
+        );
     });
 });

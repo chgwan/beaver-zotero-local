@@ -37,7 +37,7 @@ const localUnavailable = (reason: LocalWebSearchStatus['reason']): { title: stri
     if (reason === 'unsupported') {
         return {
             title: 'Web search is not available for this provider',
-            detail: 'Hosted web search works with Anthropic and OpenRouter models.',
+            detail: 'Hosted web search works with Anthropic, OpenAI and OpenRouter models.',
         };
     }
     return {

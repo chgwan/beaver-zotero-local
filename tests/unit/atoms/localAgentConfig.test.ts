@@ -123,7 +123,7 @@ describe('localWebSearchStatusAtom', () => {
         expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'off', kind: 'anthropic' });
     });
 
-    it('is available for an Anthropic or OpenRouter model once enabled', () => {
+    it('is available for an Anthropic, OpenRouter or OpenAI model once enabled', () => {
         const store = createStore();
         prefs.set('localWebSearch', true);
         select(store, anthropic);
@@ -131,6 +131,9 @@ describe('localWebSearchStatusAtom', () => {
 
         select(store, { ...custom, api_base: 'https://openrouter.ai/api/v1' });
         expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'openrouter' });
+
+        select(store, { ...custom, api_base: 'https://api.openai.com/v1' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'openai-responses' });
     });
 
     it('is unsupported for providers without an available hosted search', () => {
@@ -138,9 +141,6 @@ describe('localWebSearchStatusAtom', () => {
         prefs.set('localWebSearch', true);
         select(store, custom);
         expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'unsupported', kind: null });
-
-        select(store, { ...custom, api_base: 'https://api.openai.com/v1' });
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'unsupported', kind: 'openai-responses' });
     });
 
     it('reports no model when the selection cannot run locally', () => {

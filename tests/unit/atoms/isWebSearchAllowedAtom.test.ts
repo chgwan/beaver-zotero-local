@@ -39,20 +39,20 @@ describe('isWebSearchAllowedAtom', () => {
             expect(store.get(isWebSearchAllowedAtom)).toBe(false);
         });
 
-        it('allows hosted search for Anthropic and OpenRouter models when the preference is on', () => {
+        it('allows hosted search for Anthropic, OpenRouter and OpenAI models when the preference is on', () => {
             prefs.set('localWebSearch', true);
             const store = createStore();
             store.set(selectedModelAtom, anthropic);
             expect(store.get(isWebSearchAllowedAtom)).toBe(true);
             store.set(selectedModelAtom, openRouter);
             expect(store.get(isWebSearchAllowedAtom)).toBe(true);
+            store.set(selectedModelAtom, openAi);
+            expect(store.get(isWebSearchAllowedAtom)).toBe(true);
         });
 
         it('refuses providers without an available hosted search', () => {
             prefs.set('localWebSearch', true);
             const store = createStore();
-            store.set(selectedModelAtom, openAi);
-            expect(store.get(isWebSearchAllowedAtom)).toBe(false);
             store.set(selectedModelAtom, compatible);
             expect(store.get(isWebSearchAllowedAtom)).toBe(false);
         });
