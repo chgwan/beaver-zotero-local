@@ -198,3 +198,11 @@ pref("maxAttachmentFileSizeMB", 100);
 pref("tables.defaultLibraryID", 0);
 
 pref("cloudPreparationConsent", "");
+
+// Local mode: run the agent inside the plugin against the user's own provider
+// instead of Beaver's backend. Read once at plugin startup, so a change takes
+// effect on the next plugin reload, not mid-session.
+pref("localMode", false);
+// Round cap for one local run: how many tool-calling turns before the loop
+// stops and reports. 0 or unset uses the built-in default.
+pref("localMaxRounds", 0);

@@ -97,6 +97,8 @@ declare namespace _ZoteroTypes {
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;
       "cloudPreparationConsent": string;
+      "localMode": boolean;
+      "localMaxRounds": number;
     };
   }
 }
