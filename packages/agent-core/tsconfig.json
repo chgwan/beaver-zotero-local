@@ -83,6 +83,7 @@
     "./src/transport/providerConnection.ts",
     "./src/transport/agentService.ts",
     "./src/transport/apiService.ts",
+    "./src/transport/backendAccessPolicy.ts",
     "./src/transport/supabaseClient.ts",
     "./src/transport/credentials.ts",
     "./src/transport/otp.ts",

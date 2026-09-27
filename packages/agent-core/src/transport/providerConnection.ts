@@ -18,6 +18,7 @@
  */
 
 import { getApiBaseUrl } from './config';
+import { assertBackendAccessAllowed } from './backendAccessPolicy';
 import { logger } from '../platform/logger';
 import { resolveClientIdentity } from './clientIdentity';
 import {
@@ -157,6 +158,9 @@ export class ProviderConnection {
      * No-op if already connected or a connect is in progress.
      */
     async connect(options: ProviderConnectOptions = {}): Promise<void> {
+        // Refuse before any connection state changes, so a blocked attempt
+        // leaves nothing half-started for close() or a reconnect to find.
+        assertBackendAccessAllowed('ws.provider');
         if (this.isConnected()) {
             logger('ProviderConnection: Already connected, ignoring connect()', 1);
             return;

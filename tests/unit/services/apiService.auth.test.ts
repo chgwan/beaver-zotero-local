@@ -23,6 +23,36 @@ import {
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { ApiService } from '@beaver/agent-core/transport/apiService';
 import { getRuntimeAdapter, setRuntimeAdapter, type RuntimeAdapter } from '@beaver/agent-core/platform/runtime';
+import {
+    BackendAccessBlockedError,
+    resetBackendAccessPolicyForTesting,
+    setBackendAccessPolicy,
+} from '@beaver/agent-core/transport/backendAccessPolicy';
+
+beforeEach(() => {
+    resetBackendAccessPolicyForTesting();
+});
+
+describe('ApiService backend access policy', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('refuses before reading credentials or dispatching when backend access is blocked', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        mockSupabase.auth.getSession.mockReset();
+        setBackendAccessPolicy(() => false);
+        const service = new ApiService('https://api.example.com');
+
+        const request = service.post('/threads', { a: 1 });
+
+        await expect(request).rejects.toBeInstanceOf(BackendAccessBlockedError);
+        await expect(request).rejects.toMatchObject({ surface: 'api:POST /threads' });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(mockSupabase.auth.getSession).not.toHaveBeenCalled();
+    });
+});
 
 describe('ApiService authentication recovery', () => {
     let service: ApiService;

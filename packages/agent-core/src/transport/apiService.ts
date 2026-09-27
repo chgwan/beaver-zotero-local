@@ -5,6 +5,7 @@ import { credentials, getCredentialGeneration, assertCredentialGeneration, repor
 import { recordBackendHttpSuccess } from './backendReachability';
 import { getApiBaseUrl, getTransportConfigurationError } from './config';
 import { getRuntimeAdapter } from '../platform/runtime';
+import { assertBackendAccessAllowed } from './backendAccessPolicy';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
@@ -221,6 +222,9 @@ export class ApiService {
         deadline?: RequestDeadline,
         options?: { rawBody?: Uint8Array; headers?: Record<string, string> },
     ): Promise<Response> {
+        // Every verb funnels through here, so this one check keeps every
+        // backend client off the network while backend access is blocked.
+        assertBackendAccessAllowed(`api:${method} ${endpoint}`);
         const generation = getCredentialGeneration();
         const configurationError = getTransportConfigurationError();
         if (configurationError) throw new Error(configurationError);

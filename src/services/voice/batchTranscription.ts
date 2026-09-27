@@ -7,6 +7,7 @@ import {
     type VoiceTranscript,
     type VoiceTranscription,
 } from "@beaver/agent-core/voice/contracts";
+import { isBackendAccessAllowed } from "@beaver/agent-core/transport/backendAccessPolicy";
 
 export interface VoiceUploadContext {
     baseUrl: string;
@@ -123,6 +124,9 @@ export class BatchTranscription implements VoiceTranscription {
             }
             if (this.abort.signal.aborted) return failure("disconnected");
             if (!this.context.validate()) return failure("source_ineligible");
+            // A raw fetch outside ApiService, so it checks the backend access
+            // policy itself, before anything is dispatched.
+            if (!isBackendAccessAllowed()) return failure("disabled");
             const url = `${this.context.baseUrl.replace(/\/$/, "")}/api/v1/voice/transcriptions`;
             // Once fetch is invoked, a missing or unreadable result cannot establish whether billing occurred.
             dispatched = true;

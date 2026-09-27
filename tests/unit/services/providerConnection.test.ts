@@ -20,6 +20,16 @@ import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { notifySyncPauseOwnerSettled } from '@beaver/agent-core/transport/agentDataDispatch';
 import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import type { ClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
+import { getWSAuthToken } from '@beaver/agent-core/transport/agentService';
+import {
+    BackendAccessBlockedError,
+    resetBackendAccessPolicyForTesting,
+    setBackendAccessPolicy,
+} from '@beaver/agent-core/transport/backendAccessPolicy';
+
+beforeEach(() => {
+    resetBackendAccessPolicyForTesting();
+});
 
 const OriginalWebSocket = (globalThis as any).WebSocket;
 
@@ -95,6 +105,17 @@ describe('ProviderConnection', () => {
 
     afterEach(() => {
         (globalThis as any).WebSocket = OriginalWebSocket;
+    });
+
+    it('refuses to connect without fetching a token or opening a socket when backend access is blocked', async () => {
+        setBackendAccessPolicy(() => false);
+        const conn = new ProviderConnection('wss://api.example.com/provider');
+
+        await expect(conn.connect()).rejects.toBeInstanceOf(BackendAccessBlockedError);
+        expect(getWSAuthToken).not.toHaveBeenCalled();
+        expect(TestWebSocket.instances).toHaveLength(0);
+        // A refused connect leaves no attempt in progress, so a later connect is not ignored.
+        expect((conn as any).connecting).toBe(false);
     });
 
     // The exported singleton is constructed with no URL, so its socket address

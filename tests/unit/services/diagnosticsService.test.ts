@@ -28,6 +28,10 @@ import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import { supabase } from '@beaver/agent-core/transport/supabaseClient';
 import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
+import {
+    resetBackendAccessPolicyForTesting,
+    setBackendAccessPolicy,
+} from '@beaver/agent-core/transport/backendAccessPolicy';
 
 const getSessionMock = vi.mocked(supabase.auth.getSession);
 const resolveClientIdentityMock = vi.mocked(resolveClientIdentity);
@@ -56,6 +60,7 @@ describe('reportConnectionFailure', () => {
         });
         clearBackendHttpSuccess();
         clearConnectionFailureReportState();
+        resetBackendAccessPolicyForTesting();
         // Default: signed out — no token attached, identity available.
         getSessionMock.mockResolvedValue({
             data: { session: null },
@@ -84,6 +89,18 @@ describe('reportConnectionFailure', () => {
 
         expect(result).toEqual({ apiReachable: false, receivedHttpResponse: false, durationMs: 0 });
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing and reads no session while backend access is blocked', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        setBackendAccessPolicy(() => false);
+
+        const result = await reportConnectionFailure({ evidence });
+
+        expect(result).toEqual({ apiReachable: false, receivedHttpResponse: false, durationMs: 0 });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(getSessionMock).not.toHaveBeenCalled();
     });
 
     it('probes a registered backend even when its base URL is empty', async () => {

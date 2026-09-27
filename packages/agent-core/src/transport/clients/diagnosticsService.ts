@@ -18,6 +18,7 @@
 import { getApiBaseUrl, isTransportConfigRegistered } from '../config';
 import { logger } from '../../platform/logger';
 import { credentials } from '../credentials';
+import { isBackendAccessAllowed } from '../backendAccessPolicy';
 import { resolveClientIdentity } from '../clientIdentity';
 import { getRuntimeAdapter } from '../../platform/runtime';
 import { getLastBackendHttpSuccess, recordBackendHttpSuccess } from '../backendReachability';
@@ -193,6 +194,13 @@ export async function reportConnectionFailure(
     // test rather than a non-empty base URL: a configured backend is always
     // probed, and a probe that fails says more than one that never ran.
     if (!isTransportConfigRegistered()) {
+        return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
+    }
+
+    // This report is a raw fetch outside ApiService, so it checks the backend
+    // access policy itself. It is fire-and-forget, so a blocked report
+    // resolves quietly instead of throwing, before the session lookup.
+    if (!isBackendAccessAllowed()) {
         return { apiReachable: false, receivedHttpResponse: false, durationMs: 0 };
     }
 

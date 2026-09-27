@@ -53,6 +53,41 @@ import {
 } from '@beaver/agent-core/transport/agentService';
 import { setTransportConfig } from '@beaver/agent-core/transport/config';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
+import { getWSAuthToken } from '@beaver/agent-core/transport/agentService';
+import {
+    BackendAccessBlockedError,
+    resetBackendAccessPolicyForTesting,
+    setBackendAccessPolicy,
+} from '@beaver/agent-core/transport/backendAccessPolicy';
+
+beforeEach(() => {
+    resetBackendAccessPolicyForTesting();
+});
+
+describe('WebSocket auth token backend access policy', () => {
+    it('refuses before reading the session when backend access is blocked', async () => {
+        mockSupabase.auth.getSession.mockReset();
+        setBackendAccessPolicy(() => false);
+
+        const token = getWSAuthToken();
+
+        await expect(token).rejects.toBeInstanceOf(BackendAccessBlockedError);
+        await expect(token).rejects.toMatchObject({ surface: 'ws.auth' });
+        expect(mockSupabase.auth.getSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses an agent connect before any callback fires when backend access is blocked', async () => {
+        mockSupabase.auth.getSession.mockReset();
+        setBackendAccessPolicy(() => false);
+        const callbacks = { onError: vi.fn(), onClose: vi.fn() } as unknown as WSCallbacks;
+
+        await expect(
+            new AgentService('wss://api.example.com').connect({} as AgentRunRequest, callbacks),
+        ).rejects.toMatchObject({ surface: 'agentService.connect' });
+        expect(mockSupabase.auth.getSession).not.toHaveBeenCalled();
+        expect((callbacks as any).onError).not.toHaveBeenCalled();
+    });
+});
 
 class MockWebSocket {
     static CONNECTING = 0;

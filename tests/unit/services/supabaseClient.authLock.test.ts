@@ -420,3 +420,29 @@ describe('supabaseClient reload bridge', () => {
         expect(firstClient.auth.stopAutoRefresh).toHaveBeenCalledTimes(2);
     });
 });
+
+describe('supabaseClient backend access policy', () => {
+    // vi.resetModules() in the top-level beforeEach gives each test a fresh
+    // policy module, so no registration leaks between tests.
+    it('never creates a client while backend access is blocked', async () => {
+        const policy = await import('@beaver/agent-core/transport/backendAccessPolicy');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        module.setSupabaseStorageAdapter(createMockStorageAdapter());
+        policy.setBackendAccessPolicy(() => false);
+
+        expect(() => module.supabase.auth).toThrow(policy.BackendAccessBlockedError);
+        expect(() => module.supabase.auth).toThrow(expect.objectContaining({ surface: 'supabase.client' }));
+        expect(mockCreateClient).not.toHaveBeenCalled();
+    });
+
+    it('does not reach a delegated host client while backend access is blocked', async () => {
+        const policy = await import('@beaver/agent-core/transport/backendAccessPolicy');
+        const module = await import('@beaver/agent-core/transport/supabaseClient');
+        const provider = vi.fn(() => ({ auth: {} }) as any);
+        module.setSupabaseClientProvider(provider);
+        policy.setBackendAccessPolicy(() => false);
+
+        expect(() => module.supabase.auth).toThrow(policy.BackendAccessBlockedError);
+        expect(provider).not.toHaveBeenCalled();
+    });
+});
