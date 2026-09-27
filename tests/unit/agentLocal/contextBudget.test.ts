@@ -88,4 +88,10 @@ describe('estimateTokens with provider blocks', () => {
         const plain: LlmMessage = { role: 'assistant', content: 'ok' };
         expect(estimateTokens([{ ...plain, providerBlocks: blocks }])).toBeGreaterThan(estimateTokens([plain]) + 900);
     });
+
+    it('still counts the text and calls of a turn whose blocks are sent alongside them', () => {
+        const blocks = [{ type: 'reasoning', encrypted_content: 'x' }];
+        const long: LlmMessage = { role: 'assistant', content: big(2_000) };
+        expect(estimateTokens([{ ...long, providerBlocks: blocks }])).toBeGreaterThanOrEqual(estimateTokens([long]));
+    });
 });

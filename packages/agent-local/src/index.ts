@@ -41,6 +41,11 @@ export {
     ANTHROPIC_DEFAULT_MAX_TOKENS,
     ANTHROPIC_WEB_SEARCH_TOOL,
 } from './llm/anthropicClient';
+export {
+    createOpenAiResponsesClient,
+    buildResponsesInput,
+    OPENAI_WEB_SEARCH_TOOL,
+} from './llm/openAiResponsesClient';
 export { clientForFormat } from './llm/clientForFormat';
 export { supportsHostedWebSearch, isHostedWebSearchAvailable } from './llm/webSearchCapability';
 export type { HostedWebSearchKind } from './llm/webSearchCapability';
