@@ -8,7 +8,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { LlmRequestError } from '@beaver/agent-local/llm/types';
 import type { LlmClient } from '@beaver/agent-local/llm/types';
 import type { CustomChatModel } from '@beaver/agent-core/types/customChatModel';
-import { testLocalProvider } from '../../../react/components/preferences/localProviderTest';
+import { OPENROUTER_API_BASE } from '@beaver/agent-core/types/customChatModel';
+import {
+    plainHttpWarning,
+    testLocalEndpoint,
+    testLocalProvider,
+} from '../../../react/components/preferences/localProviderTest';
 
 const model: CustomChatModel = {
     name: 'My local model',
@@ -112,5 +117,57 @@ describe('testLocalProvider', () => {
         const [request] = (client.streamTurn as ReturnType<typeof vi.fn>).mock.calls[0];
         const serialized = JSON.stringify(request.messages);
         expect(serialized).not.toContain('super-secret-key');
+    });
+});
+
+describe('testLocalEndpoint', () => {
+    const okClient = (): LlmClient => ({
+        streamTurn: vi.fn(async () => ({ text: 'ok', thinking: '', toolCalls: [], finishReason: 'stop' as const, usage: null })),
+    });
+
+    it('resolves the model the way a chat does, so an OpenRouter entry needs no endpoint', async () => {
+        const client = okClient();
+        const clientFor = vi.fn(() => client);
+        const result = await testLocalEndpoint(
+            { name: 'OR', snapshot: 'openai/gpt-4.1', api_key: 'sk-or', provider: 'openrouter' },
+            undefined,
+            { clientFor },
+        );
+        expect(result.ok).toBe(true);
+        expect(clientFor).toHaveBeenCalledWith('openai');
+        const [request] = (client.streamTurn as ReturnType<typeof vi.fn>).mock.calls[0];
+        expect(request.model.api_base).toBe(OPENROUTER_API_BASE);
+    });
+
+    it('reports a configuration problem without contacting the provider', async () => {
+        const clientFor = vi.fn(() => okClient());
+        const result = await testLocalEndpoint(
+            { name: 'Remote', snapshot: 'm', api_key: '', api_base: 'https://api.example.com/v1', format: 'openai' },
+            undefined,
+            { clientFor },
+        );
+        expect(result.ok).toBe(false);
+        expect(result.message).toMatch(/API key/);
+        expect(clientFor).not.toHaveBeenCalled();
+    });
+
+    it('tests a keyless loopback server', async () => {
+        const result = await testLocalEndpoint(model, undefined, { clientFor: () => okClient() });
+        expect(result.ok).toBe(true);
+    });
+});
+
+describe('plainHttpWarning', () => {
+    it('warns about plain http to a host off this machine', () => {
+        expect(plainHttpWarning('http://192.168.1.5:11434/v1')).toMatch(/unencrypted/i);
+        expect(plainHttpWarning('http://example.com/v1')).toMatch(/unencrypted/i);
+    });
+
+    it('stays quiet for https, loopback, and unparseable input', () => {
+        expect(plainHttpWarning('https://api.openai.com/v1')).toBeNull();
+        expect(plainHttpWarning('http://localhost:11434/v1')).toBeNull();
+        expect(plainHttpWarning('http://127.0.0.1:8080')).toBeNull();
+        expect(plainHttpWarning('not a url')).toBeNull();
+        expect(plainHttpWarning(undefined)).toBeNull();
     });
 });

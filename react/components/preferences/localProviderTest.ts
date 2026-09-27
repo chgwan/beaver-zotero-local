@@ -6,6 +6,8 @@
  * through Beaver's backend — the api key and endpoint stay on this machine.
  */
 import type { CustomChatModel } from '@beaver/agent-core/types/customChatModel';
+import { isLoopbackEndpoint, resolveLocalAgentConfig, type SupportedFormat } from '@beaver/agent-local/config/localAgentConfig';
+import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
 import type { LlmClient } from '@beaver/agent-local/llm/types';
 import { LlmRequestError } from '@beaver/agent-local/llm/types';
 
@@ -86,4 +88,38 @@ export async function testLocalProvider(
         clearTimeout(timer);
         if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
     }
+}
+
+/**
+ * Test a provider exactly as a chat would use it: the model goes through
+ * `resolveLocalAgentConfig` first, so the test sees the same endpoint
+ * defaults, key rule and format as a run, and a configuration a run would
+ * refuse is reported without contacting the provider.
+ */
+export async function testLocalEndpoint(
+    model: CustomChatModel,
+    externalSignal?: AbortSignal,
+    options: { clientFor?: (format: SupportedFormat) => LlmClient; timeoutMs?: number } = {},
+): Promise<LocalProviderTestResult> {
+    const resolved = resolveLocalAgentConfig({ model, maxRounds: null });
+    if (!resolved.ok) return { ok: false, message: resolved.message };
+    const format = (resolved.config.model.format ?? 'openai') as SupportedFormat;
+    const client = (options.clientFor ?? clientForFormat)(format);
+    return testLocalProvider(resolved.config.model, client, options.timeoutMs, externalSignal);
+}
+
+/**
+ * A warning for an endpoint that sends the API key and library text
+ * unencrypted across a network, or null. Plain HTTP to this machine is fine.
+ */
+export function plainHttpWarning(apiBase: string | undefined): string | null {
+    const value = (apiBase ?? '').trim();
+    let protocol: string;
+    try {
+        protocol = new URL(value).protocol;
+    } catch {
+        return null;
+    }
+    if (protocol !== 'http:' || isLoopbackEndpoint(value)) return null;
+    return 'This endpoint uses plain http, so your API key and library text travel unencrypted. Use https unless the server is on a network you trust.';
 }
