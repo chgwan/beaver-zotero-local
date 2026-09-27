@@ -181,6 +181,15 @@ describe('createAnthropicClient', () => {
         });
     });
 
+    it('sends tool_choice none when the turn forbids tool calls', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
+        vi.stubGlobal('fetch', fetchMock);
+        await createAnthropicClient().streamTurn(turn({ tools: [ZOTERO_SEARCH_TOOL], toolChoice: 'none' }), handlers(), signal());
+        await createAnthropicClient().streamTurn(turn({ tools: [ZOTERO_SEARCH_TOOL] }), handlers(), signal());
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).tool_choice).toEqual({ type: 'none' });
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body).tool_choice).toBeUndefined();
+    });
+
     it('rebuilds a tool round as tool_use and tool_result content blocks', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
         vi.stubGlobal('fetch', fetchMock);

@@ -132,7 +132,8 @@ class UsageTally {
 async function streamRound(
     frames: RoundFrames,
     options: LocalAgentLoopOptions,
-    transcript: LlmMessage[]
+    transcript: LlmMessage[],
+    allowTools: boolean
 ): Promise<LlmTurnResult> {
     const { client, config, catalog, signal } = options;
     let nextPartIndex = 0;
@@ -153,7 +154,12 @@ async function streamRound(
     };
 
     const turn = await client.streamTurn(
-        { model: config.model, messages: transcript, tools: catalog.definitions() },
+        {
+            model: config.model,
+            messages: transcript,
+            tools: catalog.definitions(),
+            ...(allowTools ? {} : { toolChoice: 'none' as const }),
+        },
         {
             onThinkingDelta: (fullText) => {
                 if (fullText) writeThinking(fullText);
@@ -199,6 +205,11 @@ async function runToolCall(call: AccumulatedToolCall, catalog: LocalToolCatalog,
     };
 }
 
+function roundCapReturn(call: AccumulatedToolCall, maxRounds: number): ToolCallOutcome {
+    const message = `The call to "${call.name}" was not run: this run reached its limit of ${maxRounds} rounds.`;
+    return { outcome: 'failed', content: message, transcriptText: message };
+}
+
 /**
  * Run one local agent turn to completion, cancellation, or failure. Resolves
  * in every case, once every frame it emitted has been delivered and its
@@ -235,7 +246,10 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
         for (let round = 0; round < config.maxRounds; round++) {
             const frames = emitter.beginRound();
             transcript = fitTranscript(transcript, budget);
-            const turn = await streamRound(frames, options, transcript);
+            // The last allowed round forbids tool calls: results from it
+            // could never reach the model, so it has to answer instead.
+            const lastRound = round === config.maxRounds - 1;
+            const turn = await streamRound(frames, options, transcript, !lastRound);
             usage.addRequest(turn.usage);
 
             if (turn.toolCalls.length === 0) {
@@ -249,7 +263,9 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             transcript.push({ role: 'assistant', content: turn.text, toolCalls: turn.toolCalls });
 
             for (const call of turn.toolCalls) {
-                const result = await runToolCall(call, catalog, signal);
+                // A provider that ignores the last round's tool_choice still
+                // gets an answer for every call, but nothing is run for it.
+                const result = lastRound ? roundCapReturn(call, config.maxRounds) : await runToolCall(call, catalog, signal);
                 // Cancelled while the tool ran: the run is over, and its frames
                 // must not land on a run the UI has already stopped.
                 if (signal.aborted) {

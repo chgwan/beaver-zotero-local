@@ -102,6 +102,7 @@ export function createOpenAiClient(): LlmClient {
                         parameters: tool.parameters,
                     },
                 }));
+                if (request.toolChoice === 'none') payload.tool_choice = 'none';
             }
             if (model.reasoning_effort) {
                 payload.reasoning_effort = model.reasoning_effort;

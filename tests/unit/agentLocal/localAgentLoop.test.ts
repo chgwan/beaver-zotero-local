@@ -423,6 +423,35 @@ describe('runLocalAgentLoop', () => {
         );
     });
 
+    it('forbids tool calls in the last allowed round so the model has to answer', async () => {
+        const client = scriptedClient([
+            { toolCalls: [call('c0', { query: 'a' })] },
+            { toolCalls: [call('c1', { query: 'b' })] },
+            { textChunks: ['Here is what I found.'] },
+        ]);
+        await run(client, callbacks, stubCatalog(), { config: { ...config, maxRounds: 3 } });
+        const choices = client.streamTurn.mock.calls.map(([request]: any) => request.toolChoice ?? 'auto');
+        expect(choices).toEqual(['auto', 'auto', 'none']);
+        expect(callbacks.onWarning).not.toHaveBeenCalled();
+        expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not run calls a provider makes in the last round anyway, and still answers each one', async () => {
+        const catalog = stubCatalog();
+        const client = scriptedClient([
+            { toolCalls: [call('c0', { query: 'a' })] },
+            { toolCalls: [call('c1', { query: 'b' })] },
+        ]);
+        await run(client, callbacks, catalog, { config: { ...config, maxRounds: 2 } });
+        expect(catalog.execute).toHaveBeenCalledTimes(1);
+        const returns = callbacks.onToolReturn.mock.calls.map(([e]: any) => e.part);
+        expect(returns.map((p: any) => [p.tool_call_id, p.outcome])).toEqual([
+            ['c0', 'success'],
+            ['c1', 'failed'],
+        ]);
+        expect(callbacks.onWarning).toHaveBeenCalledTimes(1);
+    });
+
     it('closes the run once: streaming_done, run_complete, run_citations, done', async () => {
         await run(scriptedClient([{ textChunks: ['Ready.'] }]), callbacks);
         const order = [

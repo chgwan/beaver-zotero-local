@@ -47,6 +47,12 @@ export interface LlmTurnRequest {
     model: CustomChatModel;
     messages: LlmMessage[];
     tools: LocalToolDefinition[];
+    /**
+     * `'none'` forbids tool calls this turn while still declaring the tools,
+     * which a transcript that already contains tool calls needs. Defaults to
+     * letting the model choose.
+     */
+    toolChoice?: 'auto' | 'none';
 }
 
 export interface LlmClient {
