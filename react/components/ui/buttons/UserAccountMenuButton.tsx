@@ -8,6 +8,7 @@ import { hasCompletedOnboardingAtom, updateRequiredAtom, profileWithPlanAtom } f
 import { logoutAtom, userAtom } from '../../../atoms/auth';
 import { firstRunReturnRequestedAtom, firstRunSuggestionsModeAtom } from '../../../atoms/firstRun';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
+import { localModeEnabledAtom } from '../../../atoms/localMode';
 
 interface UserAccountMenuButtonProps {
     className?: string;
@@ -25,6 +26,7 @@ export function useAccountMenuItems(): MenuItem[] {
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
     const user = useAtomValue(userAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
     const setFirstRunSuggestionsMode = useSetAtom(firstRunSuggestionsModeAtom);
     const hasCompletedFirstRun = !!profile?.first_run_completed_at;
@@ -34,8 +36,8 @@ export function useAccountMenuItems(): MenuItem[] {
         setFirstRunReturnRequested(true);
     };
 
-    // Settings is hidden when an update is required. The account entries need
-    // a signed-in account, which local mode never has.
+    // Settings is hidden when an update is required. Local mode has no Beaver
+    // account, so it offers none of the account entries.
     return [
         ...(!updateRequired ? [{
             label: "Settings",
@@ -43,9 +45,9 @@ export function useAccountMenuItems(): MenuItem[] {
             icon: SettingsIcon,
             disabled: !hasCompletedOnboarding,
         }] : []),
-        ...(user ? [{
+        ...(!localMode ? [{
             label: "Manage Account",
-            onClick: () => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login${user.email ? `?email=${encodeURIComponent(user.email)}` : ''}`),
+            onClick: () => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/login${user?.email ? `?email=${encodeURIComponent(user.email)}` : ''}`),
             icon: UserIcon,
             disabled: false,
         }] : []),
@@ -61,7 +63,7 @@ export function useAccountMenuItems(): MenuItem[] {
             icon: InformationCircleIcon,
             disabled: false,
         },
-        ...(user ? [
+        ...(!localMode ? [
             {
                 label: "Report Error",
                 onClick: () => setErrorReportDialogVisible(true),
