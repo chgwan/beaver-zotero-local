@@ -818,6 +818,12 @@ describe("instance account in local mode", () => {
         void created.dispose();
     });
 
+    it("createInstanceAccount keeps backend access blocked after the plugin object is torn down", () => {
+        createInstanceAccount();
+        (Zotero as any).Beaver = undefined;
+        expect(isBackendAccessAllowed()).toBe(false);
+    });
+
     it("createInstanceAccount leaves backend access allowed when local mode is off", () => {
         beaver.localMode = false;
         createInstanceAccount();
