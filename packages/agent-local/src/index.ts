@@ -82,3 +82,5 @@ export type {
     ItemSearchSummary,
     AnnotationListSummary,
 } from './run/toolReturnMetadata';
+export { fetchJson, HostGate, DEFAULT_TIMEOUT_MS, DEFAULT_MAX_ATTEMPTS } from './search/httpJson';
+export type { HttpJsonOptions, HttpJsonResult, HostGateDeps } from './search/httpJson';
