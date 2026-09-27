@@ -6,6 +6,7 @@ import { Spinner } from '../icons/icons';
 import { activePreferencePageTabAtom } from "../../atoms/ui";
 import { userAtom } from "../../atoms/auth";
 import { creditBreakdownAtom, creditPlanAtom, hasCreditPlanAtom, isCreditPlanPastDueAtom, profileBalanceAtom } from "../../atoms/profile";
+import { localModeEnabledAtom } from "../../atoms/localMode";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useBilling } from "../../hooks/useBilling";
 import { accountService, ScheduledChange, PlanInfo } from "@beaver/agent-core/transport/clients/accountService";
@@ -195,11 +196,18 @@ const ScheduledChangeNotice: React.FC<{
     periodEnd: string | null;
     onManage: () => Promise<void>;
     disabled: boolean;
-}> = ({ currentPlan, periodEnd, onManage, disabled }) => {
+    localMode: boolean;
+}> = ({ currentPlan, periodEnd, onManage, disabled, localMode }) => {
     const surfaceWindow = useSurfaceWindow();
     const [change, setChange] = useState<ScheduledChange | null>(null);
     const [unavailable, setUnavailable] = useState(false);
+    // Local mode has no account or backend to ask, so this notice never has
+    // scheduled-change details to show there. Defense-in-depth: this
+    // component isn't reachable in local mode anyway (no credit plan there).
     useEffect(() => {
+        if (localMode) {
+            return;
+        }
         let active = true;
         let generation = 0;
         const load = async () => {
@@ -221,7 +229,7 @@ const ScheduledChangeNotice: React.FC<{
         const onFocus = () => { void load(); };
         surfaceWindow.addEventListener('focus', onFocus);
         return () => { active = false; surfaceWindow.removeEventListener('focus', onFocus); };
-    }, [surfaceWindow]);
+    }, [surfaceWindow, localMode]);
     const date = change?.effective_at ?? periodEnd;
     const price = change && new Intl.NumberFormat(undefined, {
         style: 'currency', currency: change.currency,
@@ -245,6 +253,7 @@ const ScheduledChangeNotice: React.FC<{
 const BillingSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const user = useAtomValue(userAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
 
     // --- Atoms: Plan and credits ---
     const creditPlan = useAtomValue(creditPlanAtom);
@@ -289,9 +298,14 @@ const BillingSection: React.FC = () => {
         : null;
 
     // --- Fetch plans when billing tab is active and user has no plan ---
+    // Local mode has no account or backend to ask; this section isn't shown
+    // there (see PreferencePage), but the guard is defense-in-depth.
     useEffect(() => {
+        if (localMode) {
+            return;
+        }
         fetchPlans();
-    }, [fetchPlans]);
+    }, [fetchPlans, localMode]);
 
     return (
         <>
@@ -413,6 +427,7 @@ const BillingSection: React.FC = () => {
                                 periodEnd={creditPlan.periodEnd}
                                 onManage={manageSubscription}
                                 disabled={isBillingLoading}
+                                localMode={localMode}
                             />
                         )}
 
