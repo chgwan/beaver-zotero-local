@@ -25,6 +25,7 @@ export type {
     ToolCatalogOptions,
     ToolExecutionResult,
     ToolRequest,
+    ToolRequestLimits,
 } from './tools/toolCatalog';
 export { readSseEvents } from './llm/sseReader';
 export type { SseEvent } from './llm/sseReader';
@@ -54,6 +55,17 @@ export type {
 export { runLocalAgentLoop } from './run/localAgentLoop';
 export type { LocalAgentLoopOptions } from './run/localAgentLoop';
 export { buildRunHistory, estimateTokens, HISTORY_CONTEXT_SHARE } from './run/runHistory';
+export {
+    CHARS_PER_TOKEN,
+    DEFAULT_CONTEXT_WINDOW,
+    ELIDED_TOOL_RESULT,
+    MIN_TRANSCRIPT_BUDGET,
+    TRANSCRIPT_CONTEXT_SHARE,
+    elideToolResults,
+    fitTranscript,
+    tokensForChars,
+    transcriptBudget,
+} from './run/contextBudget';
 export type { RunHistoryOptions } from './run/runHistory';
 export { buildSystemPrompt } from './run/systemPrompt';
 export type { SystemPromptOptions } from './run/systemPrompt';

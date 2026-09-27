@@ -11,6 +11,7 @@
 
 import type { AgentRun, ToolCallPart, ToolReturnPart } from '@beaver/agent-core/agents/types';
 import type { LlmMessage } from '../llm/types';
+import { elideToolResults, estimateTokens } from './contextBudget';
 import { renderUserPrompt, scopePromptToLibraries } from './userPrompt';
 
 export interface RunHistoryOptions {
@@ -18,7 +19,8 @@ export interface RunHistoryOptions {
      * The model's context window in tokens. When set, the oldest runs are
      * dropped until the history fits in `HISTORY_CONTEXT_SHARE` of it, leaving
      * the rest for the system prompt, tool definitions, the new message, and
-     * the reply.
+     * the reply. The most recent run is always kept; when it alone is over
+     * that share, its tool results are elided instead.
      */
     contextWindow?: number | null;
     /**
@@ -38,15 +40,7 @@ const TRANSCRIPT_OMITTED_FIELDS = new Set(['type', 'request_id', 'timing']);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === 'object' && !Array.isArray(value);
 
-/** A rough token count: about four characters per token for typical text. */
-export function estimateTokens(messages: readonly LlmMessage[]): number {
-    let chars = 0;
-    for (const message of messages) {
-        chars += message.content.length;
-        for (const call of message.toolCalls ?? []) chars += call.name.length + call.rawArgs.length;
-    }
-    return Math.ceil(chars / 4);
-}
+export { estimateTokens };
 
 /**
  * A stored call's arguments, replayable as-is. Arguments that were not a JSON
@@ -143,12 +137,15 @@ export function buildRunHistory(
         .filter((group) => group.length > 0);
 
     const contextWindow = options.contextWindow;
-    if (contextWindow && contextWindow > 0) {
+    if (contextWindow && contextWindow > 0 && groups.length > 0) {
         const budget = Math.floor(contextWindow * HISTORY_CONTEXT_SHARE);
         let total = groups.reduce((sum, group) => sum + estimateTokens(group), 0);
-        while (groups.length > 0 && total > budget) {
+        while (groups.length > 1 && total > budget) {
             total -= estimateTokens(groups.shift()!);
         }
+        // The latest run is always kept, so a follow-up still has the
+        // exchange it follows; its tool results give way first.
+        if (total > budget) groups[0] = elideToolResults(groups[0], budget);
     }
     return groups.flat();
 }

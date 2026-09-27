@@ -13,6 +13,7 @@
  * does not know cannot reach it.
  */
 
+import { CHARS_PER_TOKEN } from '../run/contextBudget';
 
 export interface JsonSchema {
     type: 'object';
@@ -44,7 +45,13 @@ export interface LocalToolDefinition {
      */
     checkArgs?: (args: ToolArgs) => string | null;
     /** Build the wire request from schema-valid arguments. */
-    buildRequest: (args: ToolArgs, requestId: string) => ToolRequest;
+    buildRequest: (args: ToolArgs, requestId: string, limits?: ToolRequestLimits) => ToolRequest;
+}
+
+/** Facts about the run's model that bound how much a tool may return. */
+export interface ToolRequestLimits {
+    /** The model's context window in tokens, when known. */
+    contextWindow?: number | null;
 }
 
 const clamp = (value: number | undefined, fallback: number, min: number, max: number): number =>
@@ -559,6 +566,23 @@ export const READ_ATTACHMENT_MAX_PAGES = 30;
  */
 export const READ_ATTACHMENT_MAX_CHARS = 60_000;
 
+/** Fewest characters one `read_attachment` call returns, however small the window. */
+export const READ_ATTACHMENT_MIN_CHARS = 4_000;
+
+/** Share of a known context window one `read_attachment` call may fill. */
+export const READ_ATTACHMENT_CONTEXT_SHARE = 0.25;
+
+/**
+ * The text budget for one `read_attachment` call: a share of the model's
+ * context window when it is known, between `READ_ATTACHMENT_MIN_CHARS` and
+ * `READ_ATTACHMENT_MAX_CHARS`; the cap when it is not.
+ */
+export function readAttachmentMaxChars(contextWindow: number | null | undefined): number {
+    if (!contextWindow || contextWindow <= 0) return READ_ATTACHMENT_MAX_CHARS;
+    const scaled = Math.floor(contextWindow * READ_ATTACHMENT_CONTEXT_SHARE * CHARS_PER_TOKEN);
+    return Math.min(READ_ATTACHMENT_MAX_CHARS, Math.max(READ_ATTACHMENT_MIN_CHARS, scaled));
+}
+
 const pageNumberProperty = (description: string) => ({ type: 'integer', minimum: 1, description });
 
 export const READ_ATTACHMENT_TOOL: LocalToolDefinition = {
@@ -592,7 +616,7 @@ export const READ_ATTACHMENT_TOOL: LocalToolDefinition = {
             ? 'end_page must be greater than or equal to start_page.'
             : null,
     requestEvent: 'read_attachment_request',
-    buildRequest: (args, requestId): ToolRequest => {
+    buildRequest: (args, requestId, limits): ToolRequest => {
         const startPage: number = args.start_page ?? 1;
         const lastAllowed = startPage + READ_ATTACHMENT_MAX_PAGES - 1;
         return {
@@ -601,7 +625,7 @@ export const READ_ATTACHMENT_TOOL: LocalToolDefinition = {
             attachment_id: args.attachment_id,
             start_page: startPage,
             end_page: Math.min(args.end_page ?? lastAllowed, lastAllowed),
-            max_chars: READ_ATTACHMENT_MAX_CHARS,
+            max_chars: readAttachmentMaxChars(limits?.contextWindow),
         };
     },
 };

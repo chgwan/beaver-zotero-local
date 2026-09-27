@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
 import { buildRunHistory, estimateTokens } from '@beaver/agent-local/run/runHistory';
+import { ELIDED_TOOL_RESULT } from '@beaver/agent-local/run/contextBudget';
 
 function run(id: string, prompt: string, messages: ModelMessage[], overrides: Partial<AgentRun> = {}): AgentRun {
     return {
@@ -186,6 +187,25 @@ describe('buildRunHistory', () => {
         // 250-token budget: r1 (200) must go, r2 (200) + r3 (~3) fit.
         expect(history.map((m) => m.content)).toEqual([long, long, 'last', 'reply']);
         expect(history[0].role).toBe('user');
+    });
+
+    it('keeps the most recent run, with its tool results elided, when it alone exceeds the budget', () => {
+        const long = 'x'.repeat(4000); // ~1000 tokens
+        const runs = [
+            run('r1', 'older', [response('r1', [text('old answer')])]),
+            run('r2', 'read the paper', [
+                response('r2', [call('c1', { id: 'a' })]),
+                request('r2', [ret('c1', long)]),
+                response('r2', [text('Summary.')]),
+            ]),
+        ];
+
+        const history = buildRunHistory(runs, 'thread-1', { contextWindow: 200 });
+
+        expect(history.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant']);
+        expect(history[0].content).toBe('read the paper');
+        expect(history[2]).toEqual({ role: 'tool', content: ELIDED_TOOL_RESULT, toolCallId: 'c1' });
+        expect(history[3].content).toBe('Summary.');
     });
 
     it('keeps everything when no context window is set', () => {

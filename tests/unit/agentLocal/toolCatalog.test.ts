@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildToolCatalog, READ_ONLY_TOOLS } from '@beaver/agent-local/tools/toolCatalog';
+import {
+    READ_ATTACHMENT_MAX_CHARS,
+    READ_ATTACHMENT_MIN_CHARS,
+    readAttachmentMaxChars,
+} from '@beaver/agent-local/tools/toolSchemas';
 
 const signal = new AbortController().signal;
 
@@ -351,6 +356,26 @@ describe('read_attachment', () => {
             end_page: 30,
             max_chars: 60000,
         });
+    });
+
+    it('scales the text budget to a known context window, within a floor and the cap', async () => {
+        const budgetFor = async (contextWindow: number | null) => {
+            const handle = vi.fn().mockResolvedValue({ type: 'read_attachment', request_id: 'r', pages: [] });
+            const catalog = buildToolCatalog({
+                provider: providerWith({ read_attachment_request: handle }),
+                searchableLibraryIds: [1],
+                contextWindow,
+            });
+            await catalog.execute('read_attachment', { attachment_id: 'u-ABC12345' }, signal);
+            return handle.mock.calls[0][0].max_chars;
+        };
+        // A quarter of the window, at about four characters per token.
+        expect(await budgetFor(32_000)).toBe(32_000);
+        expect(await budgetFor(8_000)).toBe(8_000);
+        expect(await budgetFor(2_000)).toBe(READ_ATTACHMENT_MIN_CHARS);
+        expect(await budgetFor(1_000_000)).toBe(READ_ATTACHMENT_MAX_CHARS);
+        expect(await budgetFor(null)).toBe(READ_ATTACHMENT_MAX_CHARS);
+        expect(readAttachmentMaxChars(16_000)).toBe(16_000);
     });
 
     it('caps a requested range at 30 pages', async () => {
