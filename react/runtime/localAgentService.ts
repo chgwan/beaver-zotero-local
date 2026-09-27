@@ -37,6 +37,7 @@ import { runLocalAgentLoop } from '@beaver/agent-local/run/localAgentLoop';
 import { buildRunHistory } from '@beaver/agent-local/run/runHistory';
 import { buildToolCatalog } from '@beaver/agent-local/tools/toolCatalog';
 import { getSearchableLibraryIds } from '../../src/services/agentDataProvider/utils';
+import { readAttachmentEntry } from '../../src/services/agentDataProvider/handleReadAttachmentRequest';
 import { localAgentConfigInputAtom } from '../atoms/localAgentConfig';
 import { isLocalMode } from '../atoms/localMode';
 import { store } from '../store';
@@ -86,7 +87,12 @@ export class LocalAgentService {
         let history: ReturnType<typeof buildRunHistory>;
         try {
             catalog = buildToolCatalog({
-                provider: resolveDefaultAgentDataProvider({}),
+                // The shared map's document entry answers in the backend wire
+                // format; the local reader returns a bounded page window instead.
+                provider: {
+                    ...resolveDefaultAgentDataProvider({}),
+                    read_attachment_request: readAttachmentEntry,
+                },
                 searchableLibraryIds: getSearchableLibraryIds(),
             });
             history = buildRunHistory(store.get(threadRunsAtom), request.thread_id ?? null, {

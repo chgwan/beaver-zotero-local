@@ -5,6 +5,8 @@ import {
     isItemSearchResult,
     extractGetAnnotationsData,
     extractItemSearchData,
+    extractReadPagesFrontendData,
+    isReadPagesFrontendResult,
 } from '@beaver/agent-core/run-state/toolResultTypes';
 
 describe('buildToolReturnMetadata', () => {
@@ -85,5 +87,39 @@ describe('buildToolReturnMetadata', () => {
     it('adds nothing when the content does not have the expected shape', () => {
         expect(buildToolReturnMetadata('item_search_by_metadata', { items: 'x' }, {})).toBeUndefined();
         expect(buildToolReturnMetadata('find_annotations', { annotations: null }, {})).toBeUndefined();
+    });
+});
+
+describe('buildToolReturnMetadata for read_attachment', () => {
+    it('builds the page summary an attachment read card renders from', () => {
+        const content = {
+            type: 'read_attachment',
+            request_id: 'r',
+            attachment_id: 'u-ATT00001',
+            attachment: { library_id: 1, zotero_key: 'ATT00001', library_ref: 'u' },
+            total_pages: 12,
+            pages: [
+                { page_number: 3, text: 'three' },
+                { page_number: 4, text: 'four' },
+            ],
+        };
+        const metadata = buildToolReturnMetadata('read_attachment', content, { attachment_id: 'u-ATT00001' });
+        expect(metadata).toEqual({
+            summary: {
+                tool_name: 'read_attachment',
+                result_count: 2,
+                pages: [
+                    { library_id: 1, zotero_key: 'ATT00001', library_ref: 'u', page_number: 3 },
+                    { library_id: 1, zotero_key: 'ATT00001', library_ref: 'u', page_number: 4 },
+                ],
+            },
+        });
+        expect(isReadPagesFrontendResult('read_attachment', content, metadata)).toBe(true);
+        expect(extractReadPagesFrontendData(content, metadata)?.pages).toHaveLength(2);
+    });
+
+    it('gives no summary when the response has no resolved attachment', () => {
+        const content = { pages: [{ page_number: 1, text: 'x' }] };
+        expect(buildToolReturnMetadata('read_attachment', content, {})).toBeUndefined();
     });
 });

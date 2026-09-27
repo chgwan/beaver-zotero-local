@@ -315,7 +315,8 @@ export const GET_METADATA_TOOL: LocalToolDefinition = {
         "Get complete bibliographic metadata for specific items in the user's Zotero library: every Zotero " +
         'field (title, creators, abstract, DOI, journal, volume, pages, date, …) plus tags and collection ' +
         'memberships. Use it after finding items via search or listing. Set include_attachments to see the ' +
-        "item's files and their availability, and include_notes to list its child notes for `read_note`.",
+        "item's files and their availability (attachment IDs for `read_attachment`), and include_notes to " +
+        'list its child notes for `read_note`.',
     parameters: {
         type: 'object',
         properties: {
@@ -548,6 +549,63 @@ export const FIND_ANNOTATIONS_TOOL: LocalToolDefinition = {
     },
 };
 
+/** Most pages one `read_attachment` call returns. */
+export const READ_ATTACHMENT_MAX_PAGES = 30;
+
+/**
+ * Most characters of page text one `read_attachment` call returns. Pages past
+ * the budget are left for a follow-up call, so a dense document cannot flood
+ * the model's context in one read.
+ */
+export const READ_ATTACHMENT_MAX_CHARS = 60_000;
+
+const pageNumberProperty = (description: string) => ({ type: 'integer', minimum: 1, description });
+
+export const READ_ATTACHMENT_TOOL: LocalToolDefinition = {
+    name: 'read_attachment',
+    description:
+        "Read the text of a PDF, EPUB, or web snapshot attachment from the user's Zotero library, page by " +
+        `page. Returns up to ${READ_ATTACHMENT_MAX_PAGES} pages per call (EPUB and snapshot pages are ` +
+        'sections of the document); a long page range may stop early to bound the text, in which case the ' +
+        'result gives `next_start_page`. For long documents, read progressively by page range. Get ' +
+        'attachment IDs from `get_metadata` with include_attachments, or from search results; a parent ' +
+        "item ID reads that item's best attachment.",
+    parameters: {
+        type: 'object',
+        properties: {
+            attachment_id: {
+                type: 'string',
+                minLength: 1,
+                description: `The attachment ID ${itemIdDescription}.`,
+            },
+            start_page: pageNumberProperty('First page to read (1-indexed). Defaults to page 1.'),
+            end_page: pageNumberProperty(
+                `Last page to read (inclusive). Defaults to start_page + ${READ_ATTACHMENT_MAX_PAGES - 1}; ` +
+                    `at most ${READ_ATTACHMENT_MAX_PAGES} pages are read per call.`
+            ),
+        },
+        required: ['attachment_id'],
+        additionalProperties: false,
+    },
+    checkArgs: (args) =>
+        args.end_page !== undefined && args.end_page < (args.start_page ?? 1)
+            ? 'end_page must be greater than or equal to start_page.'
+            : null,
+    requestEvent: 'read_attachment_request',
+    buildRequest: (args, requestId): ToolRequest => {
+        const startPage: number = args.start_page ?? 1;
+        const lastAllowed = startPage + READ_ATTACHMENT_MAX_PAGES - 1;
+        return {
+            event: 'read_attachment_request',
+            request_id: requestId,
+            attachment_id: args.attachment_id,
+            start_page: startPage,
+            end_page: Math.min(args.end_page ?? lastAllowed, lastAllowed),
+            max_chars: READ_ATTACHMENT_MAX_CHARS,
+        };
+    },
+};
+
 /**
  * The read-only tool set. Write actions are absent because they require the
  * approval flow, which local mode does not implement; topic search is absent
@@ -563,4 +621,5 @@ export const READ_ONLY_TOOLS: readonly LocalToolDefinition[] = [
     LIST_LIBRARIES_TOOL,
     READ_NOTE_TOOL,
     FIND_ANNOTATIONS_TOOL,
+    READ_ATTACHMENT_TOOL,
 ];

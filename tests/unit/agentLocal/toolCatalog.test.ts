@@ -47,6 +47,7 @@ describe('READ_ONLY_TOOLS', () => {
             list_libraries: 'list_libraries_request',
             read_note: 'read_note_request',
             find_annotations: 'find_annotations_request',
+            read_attachment: 'read_attachment_request',
         });
     });
 
@@ -58,7 +59,7 @@ describe('READ_ONLY_TOOLS', () => {
     });
 
     it('never points the model at a tool the catalog does not offer', () => {
-        const absent = ['search_by_topic', 'search_by_metadata', 'get_item_details', 'read_attachment', 'create_note'];
+        const absent = ['search_by_topic', 'search_by_metadata', 'get_item_details', 'create_note'];
         for (const tool of READ_ONLY_TOOLS) {
             for (const name of absent) {
                 expect(tool.description, `${tool.name} mentions ${name}`).not.toMatch(
@@ -319,5 +320,80 @@ describe('buildToolCatalog', () => {
         });
         const result = await catalog.execute('list_libraries', {}, signal);
         expect(result).toMatchObject({ ok: false, retryable: false });
+    });
+});
+
+describe('read_attachment', () => {
+    const readAttachmentCatalog = (handle = vi.fn().mockResolvedValue({ type: 'read_attachment', request_id: 'r', pages: [] })) => ({
+        handle,
+        catalog: buildToolCatalog({
+            provider: providerWith({ read_attachment_request: handle }),
+            searchableLibraryIds: [1],
+        }),
+    });
+
+    it('declares a closed schema with paging arguments', () => {
+        const tool = READ_ONLY_TOOLS.find((t) => t.name === 'read_attachment');
+        expect(tool?.parameters.additionalProperties).toBe(false);
+        expect(tool?.parameters.required).toEqual(['attachment_id']);
+        expect(Object.keys(tool?.parameters.properties ?? {}).sort()).toEqual(['attachment_id', 'end_page', 'start_page']);
+    });
+
+    it('requests the first 30 pages with a text budget when no range is given', async () => {
+        const { handle, catalog } = readAttachmentCatalog();
+        const result = await catalog.execute('read_attachment', { attachment_id: 'u-ABC12345' }, signal);
+        expect(result.ok).toBe(true);
+        expect(handle.mock.calls[0][0]).toEqual({
+            event: 'read_attachment_request',
+            request_id: expect.any(String),
+            attachment_id: 'u-ABC12345',
+            start_page: 1,
+            end_page: 30,
+            max_chars: 60000,
+        });
+    });
+
+    it('caps a requested range at 30 pages', async () => {
+        const { handle, catalog } = readAttachmentCatalog();
+        await catalog.execute('read_attachment', { attachment_id: 'u-ABC12345', start_page: 10, end_page: 100 }, signal);
+        expect(handle.mock.calls[0][0]).toMatchObject({ start_page: 10, end_page: 39 });
+    });
+
+    it('keeps a requested range within the cap as given', async () => {
+        const { handle, catalog } = readAttachmentCatalog();
+        await catalog.execute('read_attachment', { attachment_id: 'u-ABC12345', start_page: 3, end_page: 5 }, signal);
+        expect(handle.mock.calls[0][0]).toMatchObject({ start_page: 3, end_page: 5 });
+    });
+
+    it('rejects an end page before the start page without calling the handler', async () => {
+        const { handle, catalog } = readAttachmentCatalog();
+        const result = await catalog.execute(
+            'read_attachment',
+            { attachment_id: 'u-ABC12345', start_page: 10, end_page: 5 },
+            signal
+        );
+        expect(result).toMatchObject({ ok: false, retryable: true });
+        expect(!result.ok && result.error).toContain('end_page');
+        expect(handle).not.toHaveBeenCalled();
+    });
+
+    it('rejects a page number below 1 and an unknown argument', async () => {
+        const { handle, catalog } = readAttachmentCatalog();
+        expect((await catalog.execute('read_attachment', { attachment_id: 'u-A', start_page: 0 }, signal)).ok).toBe(false);
+        expect((await catalog.execute('read_attachment', { attachment_id: 'u-A', mode: 'structured' }, signal)).ok).toBe(false);
+        expect(handle).not.toHaveBeenCalled();
+    });
+
+    it('reports an excluded-library refusal as not retryable', async () => {
+        const { catalog } = readAttachmentCatalog(
+            vi.fn().mockResolvedValue({
+                type: 'read_attachment',
+                request_id: 'r',
+                error: 'Library excluded',
+                error_code: 'library_excluded',
+            })
+        );
+        const result = await catalog.execute('read_attachment', { attachment_id: 'g5-ABC12345' }, signal);
+        expect(result).toEqual({ ok: false, retryable: false, error: 'Library excluded' });
     });
 });

@@ -3,15 +3,17 @@
  *
  * The result cards are built by the renderer from a tool return's `content`
  * and `metadata.summary`. Most tools' cards read the handler response in
- * `content` directly. Two read only a summary of item references, which the
- * hosted agent attaches to the return; local mode derives the same summary
- * from the handler response here, so those cards render identically.
+ * `content` directly. The rest read only a summary of item or page
+ * references, which the hosted agent attaches to the return; local mode
+ * derives the same summary from the handler response here, so those cards
+ * render identically.
  *
  * Returns `undefined` when a tool needs no summary or the response does not
  * have the expected shape — the card then falls back to its content-only path.
  */
 
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { PageReference } from '@beaver/agent-core/run-state/toolResultTypes';
 import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
 
 export interface ItemSearchSummary {
@@ -28,7 +30,17 @@ export interface AnnotationListSummary {
     annotations: ZoteroItemReference[];
 }
 
-export type ToolReturnMetadata = { summary: ItemSearchSummary } | { summary: AnnotationListSummary };
+/** The page list an attachment read card renders (the backend's read-pages summary). */
+export interface ReadPagesSummary {
+    tool_name: 'read_attachment';
+    result_count: number;
+    pages: PageReference[];
+}
+
+export type ToolReturnMetadata =
+    | { summary: ItemSearchSummary }
+    | { summary: AnnotationListSummary }
+    | { summary: ReadPagesSummary };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === 'object' && !Array.isArray(value);
@@ -81,6 +93,17 @@ function annotationSummary(
     };
 }
 
+function readPagesSummary(content: Record<string, unknown>): ReadPagesSummary | null {
+    const attachment = referenceFrom(content.attachment);
+    if (!attachment || !Array.isArray(content.pages)) return null;
+    const pages: PageReference[] = [];
+    for (const page of content.pages) {
+        if (!isRecord(page) || typeof page.page_number !== 'number') continue;
+        pages.push({ ...attachment, page_number: page.page_number });
+    }
+    return { tool_name: 'read_attachment', result_count: pages.length, pages };
+}
+
 /**
  * Metadata to attach to a successful tool return, derived from the handler
  * response (`content`) and the call's arguments.
@@ -97,6 +120,10 @@ export function buildToolReturnMetadata(
         }
         case 'find_annotations': {
             const summary = annotationSummary(content, args);
+            return summary ? { summary } : undefined;
+        }
+        case 'read_attachment': {
+            const summary = readPagesSummary(content);
             return summary ? { summary } : undefined;
         }
         default:
