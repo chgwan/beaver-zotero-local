@@ -161,6 +161,7 @@ export function createAnthropicClient(): LlmClient {
                     description: tool.description,
                     input_schema: tool.parameters,
                 }));
+                if (request.toolChoice === 'none') payload.tool_choice = { type: 'none' };
             }
 
             const url = joinEndpoint(stripTrailingV1(model.api_base ?? ''), 'v1/messages');

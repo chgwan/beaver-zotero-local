@@ -124,6 +124,15 @@ describe('createOpenAiClient', () => {
         });
     });
 
+    it('sends tool_choice none when the turn forbids tool calls', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(turn({ tools: [ZOTERO_SEARCH_TOOL], toolChoice: 'none' }), handlers(), signal());
+        await createOpenAiClient().streamTurn(turn({ tools: [ZOTERO_SEARCH_TOOL] }), handlers(), signal());
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body).tool_choice).toBe('none');
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body).tool_choice).toBeUndefined();
+    });
+
     it('omits the tools field entirely when there are none', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
         vi.stubGlobal('fetch', fetchMock);
