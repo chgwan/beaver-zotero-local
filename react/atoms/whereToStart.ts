@@ -14,6 +14,8 @@ import { newThreadAtom } from './threads';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
+import { localModeEnabledAtom } from './localMode';
+import { localWebSearchStatusAtom } from './localAgentConfig';
 import { resolvePromptVariables } from '../utils/promptVariables';
 import { ensurePromptActionTokens, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { PromptAction } from '@beaver/agent-core/agents/types';
@@ -251,10 +253,29 @@ function resetSelectionState(set: any): void {
 }
 
 /**
- * Enable web search for external-search options. If the selected model cannot
- * search, switch to the included Beaver model when one is available.
+ * Enable web search for external-search options.
+ *
+ * Cloud mode: if the selected model cannot search, switch to the included
+ * Beaver model when one is available.
+ *
+ * Local mode: there is no Beaver-hosted model to switch to —
+ * `beaverDefaultModelAtom` there is just the first custom model in the
+ * selector — so switching would silently replace the user's chosen model and
+ * stamp it `access_mode: 'app_key'`. Local mode never switches models here:
+ * it enables web search only when the selected provider's hosted search is
+ * actually available, and otherwise launches without it, same as cloud mode
+ * does when there is no fallback model.
  */
-function enableWebSearchForLaunch(get: any, set: any): void {
+export function enableWebSearchForLaunch(get: any, set: any): void {
+    if (get(localModeEnabledAtom)) {
+        if (!get(localWebSearchStatusAtom).available) {
+            logger('whereToStart: web search unavailable in local mode; launching without it', 1);
+            return;
+        }
+        set(isWebSearchEnabledAtom, true);
+        return;
+    }
+
     if (!get(isWebSearchAllowedAtom)) {
         const beaverDefaultModel = get(beaverDefaultModelAtom);
         if (!beaverDefaultModel) {
