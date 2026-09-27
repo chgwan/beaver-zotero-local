@@ -14,13 +14,26 @@ import { addAPIKeyMessageAtom } from '../../utils/popupMessageUtils';
 interface ApiKeyInputProps {
     id: string;
     label: string;
-    provider: ProviderType;
+    /** Required when `verify` is true (the default); unused otherwise. */
+    provider?: ProviderType;
     linkUrl?: string;
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
     className?: string;
     savePref: (value: string) => void;
+    /**
+     * Whether this key belongs to a chat-model provider and should go through
+     * Beaver's key-verification flow: a "Confirm" button that posts to
+     * Beaver's backend and, on success, activates the key for the model
+     * selector. Defaults to true.
+     *
+     * Set to false for a key the backend has no concept of verifying (e.g. a
+     * literature-search API) — this must be false in local mode, which sends
+     * nothing to Beaver's servers. The field then has no Confirm button and
+     * saves on every keystroke instead.
+     */
+    verify?: boolean;
 }
 
 
@@ -33,7 +46,8 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     onChange,
     placeholder = "Enter your API Key",
     className = "",
-    savePref
+    savePref,
+    verify = true,
 }) => {
     const [isVerifying, setIsVerifying] = useState(false);
     const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -58,9 +72,15 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
         const newValue = e.target.value;
         setCurrentValue(newValue);
         onChange(newValue);
+        if (!verify) {
+            // No provider-verification flow: nothing to confirm, so persist
+            // immediately rather than waiting for a Confirm click.
+            savePref(newValue);
+            return;
+        }
         if (newValue === '') {
             savePref(newValue);
-            setApiKey({ provider, value: newValue });
+            if (provider) setApiKey({ provider, value: newValue });
             validateSelectedModel();
         }
         if (verificationStatus !== 'idle') {
@@ -84,6 +104,7 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
     };
 
     const handleVerify = async () => {
+        if (!provider) return;
         setIsVerifying(true);
         setVerificationStatus('idle');
         setVerificationError(null);
@@ -178,26 +199,28 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         value={currentValue}
                         onChange={handleChange}
                         placeholder={placeholder}
-                        className={`flex-1 p-1 m-0 preference-input text-sm ${inputBorderColor}`}
-                        aria-invalid={verificationStatus === 'error'}
+                        className={`flex-1 p-1 m-0 preference-input text-sm ${verify ? inputBorderColor : 'border-quinary'}`}
+                        aria-invalid={verify && verificationStatus === 'error'}
                     />
-                    <Button
-                        variant={buttonVariant}
-                        style={{ padding: "3px 6px" }}
-                        rightIcon={buttonIcon}
-                        onClick={handleVerify}
-                        disabled={isVerifying || !currentValue}
-                    >
-                        {buttonText}
-                    </Button>
+                    {verify && (
+                        <Button
+                            variant={buttonVariant}
+                            style={{ padding: "3px 6px" }}
+                            rightIcon={buttonIcon}
+                            onClick={handleVerify}
+                            disabled={isVerifying || !currentValue}
+                        >
+                            {buttonText}
+                        </Button>
+                    )}
                 </div>
-                {provider.toLowerCase() === 'google' && (
+                {verify && provider?.toLowerCase() === 'google' && (
                     <div className="text-sm font-color-secondary display-flex flex-row items-start gap-1">
                         <Icon icon={InformationCircleIcon} className="scale-90 mt-015 font-color-secondary" />
                         Free Gemini API keys will fail due to severe rate limits. Use a paid key for reliable performance.
                     </div>
                 )}
-                {provider.toLowerCase() === 'anthropic' && (
+                {verify && provider?.toLowerCase() === 'anthropic' && (
                     <div className="text-sm font-color-secondary display-flex flex-row items-start gap-1">
                         <Icon icon={InformationCircleIcon} className="scale-90 mt-015 font-color-secondary" />
                         Anthropic API keys require Tier 2 for reliable performance.{' '}
@@ -212,12 +235,12 @@ const ApiKeyInput: React.FC<ApiKeyInputProps> = ({
                         </a>
                     </div>
                 )}
-                {verificationStatus === 'error' && verificationMessage && (
+                {verify && verificationStatus === 'error' && verificationMessage && (
                     <div className="text-sm font-color-error" role="alert">
                         {verificationMessage}
                     </div>
                 )}
-                {streamingVerificationFailed && (
+                {verify && streamingVerificationFailed && (
                     <div className="display-flex flex-row items-start gap-2 flex-1 w-full">
                         <Icon icon={AlertIcon} className="scale-10 mt-010 font-color-secondary" />
                         <div className="text-sm font-color-secondary">
