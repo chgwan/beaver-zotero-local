@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ExcludedLibrary } from '@beaver/agent-core/types/profile';
 import {
     isProfileLoadedAtom,
@@ -14,15 +14,22 @@ import LibraryAccessList from '../../../react/components/preferences/LibraryAcce
 // The real profile atoms drive the checkboxes, so the list is proven to use
 // the same exclusion keying as the searchable-library boundary. Only the
 // account round-trip and the local item counts are stood in for.
-const { toggled, state, counts } = vi.hoisted(() => ({
+const { toggled, state, counts, localPrefs } = vi.hoisted(() => ({
     toggled: [] as any[],
     state: { updating: false },
     counts: vi.fn(async (libraryID: number) => ({
         libraryID, groupID: null, name: '', isGroup: false,
         itemCount: libraryID * 10, attachmentCount: libraryID, pdfCount: 0, imageCount: 0,
     })),
+    localPrefs: { value: undefined as string | undefined },
 }));
 vi.mock('../../../src/utils/libraries', () => ({ getLibraryItemCounts: counts }));
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: () => localPrefs.value,
+    setPref: (_key: string, value: string) => {
+        localPrefs.value = value;
+    },
+}));
 vi.mock('../../../react/atoms/excludedLibraries', async () => {
     const { atom } = await import('jotai');
     return {
@@ -52,11 +59,17 @@ const localLibraries = [
 ];
 
 let previousLibraries: any;
+let previousBeaver: any;
+beforeEach(() => {
+    previousBeaver = (Zotero as any).Beaver;
+});
 afterEach(() => {
     vi.clearAllMocks();
     toggled.length = 0;
     state.updating = false;
+    localPrefs.value = undefined;
     (Zotero as any).Libraries = previousLibraries;
+    (Zotero as any).Beaver = previousBeaver;
 });
 
 /** A loaded profile carrying only the exclusions; nothing else on it is read here. */
@@ -67,6 +80,27 @@ function storeWithProfile(excluded: ExcludedLibrary[] | null) {
         store.set(isProfileLoadedAtom, true);
         store.set(profileProjectionAtom, { excluded_libraries: excluded } as any);
     }
+    return store;
+}
+
+/**
+ * Local mode: no profile, a preference-backed pending list, and the plugin
+ * realm's in-effect scope (only re-read at startup, so it can lag a pending
+ * edit). `searchableLibraryIds` omitted means the scope is not yet known.
+ */
+function storeWithLocalMode({
+    localExcludedRaw,
+    searchableLibraryIds,
+}: { localExcludedRaw?: string; searchableLibraryIds?: number[] } = {}) {
+    (Zotero as any).Beaver = {
+        ...(Zotero as any).Beaver,
+        localMode: true,
+        libraryScopeInitialized: searchableLibraryIds !== undefined,
+        searchableLibraryIds,
+    };
+    localPrefs.value = localExcludedRaw;
+    const store = createStore();
+    store.set(localZoteroLibrariesAtom, localLibraries);
     return store;
 }
 
@@ -202,5 +236,32 @@ it('still lists a library whose item count could not be read', async () => {
     await render(storeWithProfile([]), (container) => {
         expect(checkboxes(container)).toHaveLength(2);
         expect(container.textContent).toContain('My Library');
+    });
+});
+
+it('draws checkboxes from the local preference in local mode, without waiting on a profile', async () => {
+    await render(storeWithLocalMode({ localExcludedRaw: '[{"type":"user"}]', searchableLibraryIds: [2] }), (container) => {
+        expect(checkboxes(container).map((box) => box.checked)).toEqual([false, true]);
+        expect(container.textContent).not.toContain('every device signed in to your account');
+        expect(container.textContent).not.toContain('Waiting for your Beaver account to load…');
+    });
+});
+
+it('shows no restart notice when the pending edit already matches what is in effect', async () => {
+    await render(storeWithLocalMode({ localExcludedRaw: '[{"type":"user"}]', searchableLibraryIds: [2] }), (container) => {
+        expect(container.querySelector('[role="status"]')).toBeNull();
+    });
+});
+
+it('shows a restart notice when a pending local edit has not taken effect yet', async () => {
+    await render(storeWithLocalMode({ localExcludedRaw: '[{"type":"user"}]', searchableLibraryIds: [1, 2] }), (container) => {
+        expect(container.querySelector('[role="status"]')?.textContent).toContain('Restart Zotero to apply');
+    });
+});
+
+it('warns and treats an invalid local preference as nothing excluded', async () => {
+    await render(storeWithLocalMode({ localExcludedRaw: 'not json', searchableLibraryIds: [1, 2] }), (container) => {
+        expect(container.querySelector('[role="alert"]')?.textContent).toContain('saved library list is invalid');
+        expect(checkboxes(container).every((box) => box.checked)).toBe(true);
     });
 });

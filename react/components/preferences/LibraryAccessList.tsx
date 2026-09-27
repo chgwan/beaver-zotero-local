@@ -8,16 +8,30 @@ import {
     allLibrariesExcludedAtom,
     excludedEntryKey,
     excludedLibrariesAtom,
+    excludedLibraryIdsAtom,
+    excludedIdSetsDiffer,
     isProfileLoadedAtom,
     libraryExclusionKey,
+    localExcludedLibraryEntriesAtom,
+    pendingExcludedLibraryIdsAtom,
     profileWithPlanAtom,
 } from '../../atoms/profile';
 import {
     isUpdatingExcludedLibrariesAtom,
     toggleExcludedLibraryAtom,
 } from '../../atoms/excludedLibraries';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import { AlertIcon, CSSIcon, Icon } from '../icons/icons';
 import { SettingsGroup } from './components/SettingsElements';
+
+/**
+ * Copy for the top of the library list. Local mode has no account and
+ * nothing syncs across devices, so it drops the multi-device sentence.
+ */
+export function libraryAccessDescription(localMode: boolean): string {
+    const base = 'Beaver only searches, reads, and edits the libraries checked here.';
+    return localMode ? base : `${base} This applies on every device signed in to your account.`;
+}
 
 /** Libraries shown before the list collapses behind "Show all". */
 const COLLAPSED_LIBRARY_COUNT = 3;
@@ -61,13 +75,25 @@ function compareLibraries(a: ZoteroLibrary, b: ZoteroLibrary): number {
  * implements the exclusion boundary, not a path that sends data anywhere.
  */
 const LibraryAccessList: React.FC = () => {
-    const excludedLibraries = useAtomValue(excludedLibrariesAtom);
-    // The exclusion list lives on the profile; until it has loaded, an empty
-    // list means "unknown", not "everything allowed", so no box is drawn.
+    const localMode = useAtomValue(localModeEnabledAtom);
+    const cloudExcludedLibraries = useAtomValue(excludedLibrariesAtom);
+    const localExcludedEntries = useAtomValue(localExcludedLibraryEntriesAtom);
+    // In local mode the pref may hold an invalid value (e.g. hand-edited);
+    // treat that as "nothing excluded yet" for the checkboxes, but still warn.
+    const localEntriesInvalid = localMode && localExcludedEntries === null;
+    const excludedLibraries = localMode ? (localExcludedEntries ?? []) : cloudExcludedLibraries;
+    // The cloud exclusion list lives on the profile; until it has loaded, an
+    // empty list means "unknown", not "everything allowed", so no box is
+    // drawn. Local mode has no profile to wait for.
     const profileLoaded = useAtomValue(isProfileLoadedAtom);
     const profile = useAtomValue(profileWithPlanAtom);
-    const profileReady = profileLoaded && profile !== null;
-    const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    const profileReady = localMode || (profileLoaded && profile !== null);
+    const allLibrariesExcludedInEffect = useAtomValue(allLibrariesExcludedAtom);
+    const pendingExcludedIds = useAtomValue(pendingExcludedLibraryIdsAtom);
+    const effectiveExcludedIds = useAtomValue(excludedLibraryIdsAtom);
+    // Local mode saves to a preference the plugin realm only re-reads at
+    // startup, so a pending edit needs a restart before it takes effect.
+    const needsRestart = localMode && excludedIdSetsDiffer(pendingExcludedIds, effectiveExcludedIds);
     const isUpdating = useAtomValue(isUpdatingExcludedLibrariesAtom);
     const toggleExcludedLibrary = useSetAtom(toggleExcludedLibraryAtom);
 
@@ -114,6 +140,12 @@ const LibraryAccessList: React.FC = () => {
         [excludedLibraries],
     );
     const personalExcluded = isPersonalLibraryExcluded(excludedLibraries);
+    // In local mode the checkboxes reflect the pending edit, so the "all
+    // excluded" warning must match that rather than the (possibly stale,
+    // pre-restart) in-effect scope.
+    const allLibrariesExcludedPending = allLibraries !== null && allLibraries.length > 0
+        && allLibraries.every((library) => excludedKeys.has(libraryExclusionKey(library)));
+    const allLibrariesExcluded = localMode ? allLibrariesExcludedPending : allLibrariesExcludedInEffect;
     const collapsible = (allLibraries?.length ?? 0) > COLLAPSED_LIBRARY_COUNT;
     const visibleLibraries = allLibraries && collapsible && !expanded
         ? allLibraries.slice(0, COLLAPSED_LIBRARY_COUNT)
@@ -127,11 +159,10 @@ const LibraryAccessList: React.FC = () => {
     return (
         <div className="display-flex flex-col gap-2">
             <div className="text-base font-color-secondary" style={{ paddingLeft: '2px' }}>
-                Beaver only searches, reads, and edits the libraries checked here.
-                This applies on every device signed in to your account.
+                {libraryAccessDescription(localMode)}
             </div>
 
-            {(personalExcluded || allLibrariesExcluded) && (
+            {(personalExcluded || allLibrariesExcluded || localEntriesInvalid) && (
                 <div
                     role="alert"
                     className="display-flex flex-row items-start gap-2 text-sm p-2 rounded-md"
@@ -139,10 +170,22 @@ const LibraryAccessList: React.FC = () => {
                 >
                     <Icon icon={AlertIcon} className="scale-11 mt-015 flex-none" />
                     <span>
-                        {allLibrariesExcluded
-                            ? "All libraries are unchecked. Beaver can't access any libraries."
-                            : 'Your personal library is unchecked, so Beaver cannot use it on any of your devices.'}
+                        {localEntriesInvalid
+                            ? 'Your saved library list is invalid. Check a library below to reset it.'
+                            : allLibrariesExcluded
+                                ? "All libraries are unchecked. Beaver can't access any libraries."
+                                : 'Your personal library is unchecked, so Beaver cannot use it on any of your devices.'}
                     </span>
+                </div>
+            )}
+
+            {needsRestart && (
+                <div
+                    role="status"
+                    className="display-flex flex-row items-start gap-2 text-sm p-2 rounded-md"
+                    style={{ color: 'var(--fill-secondary)', border: '1px solid var(--fill-quinary)', background: 'var(--fill-quinary)' }}
+                >
+                    <span>Restart Zotero to apply this change.</span>
                 </div>
             )}
 

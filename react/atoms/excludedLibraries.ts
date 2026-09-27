@@ -1,18 +1,53 @@
 import { atom } from 'jotai';
+import { ExcludedLibrary } from '@beaver/agent-core/types/profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { ZoteroLibrary } from '@beaver/agent-core/types/zotero';
+import { writeLocalExcludedLibrariesPref } from '../../src/services/libraryScope';
 import {
     excludedEntryFromLibrary,
     excludedEntryKey,
     libraryExclusionKey,
+    localExcludedLibraryEntriesAtom,
     profileWithPlanAtom,
 } from './profile';
+import { localModeEnabledAtom } from './localMode';
 
 export const isUpdatingExcludedLibrariesAtom = atom(false);
+
+/**
+ * Toggles one library's membership in an exclusion list, preserving entries
+ * for libraries this device doesn't currently see (e.g. a group the account
+ * excluded from another device).
+ */
+export function nextExcludedLibraries(current: ExcludedLibrary[], library: ZoteroLibrary): ExcludedLibrary[] {
+    const toggledKey = libraryExclusionKey(library);
+    const isExcluded = current.some(entry => excludedEntryKey(entry) === toggledKey);
+    return isExcluded
+        ? current.filter(entry => excludedEntryKey(entry) !== toggledKey)
+        : [...current, excludedEntryFromLibrary(library)];
+}
 
 export const toggleExcludedLibraryAtom = atom(
     null,
     async (get, set, library: ZoteroLibrary) => {
+        if (get(localModeEnabledAtom)) {
+            // No profile in local mode: the exclusion list lives in the
+            // `localExcludedLibraries` preference, and this edit only takes
+            // effect after a restart (the plugin realm reads it once at startup).
+            const current = get(localExcludedLibraryEntriesAtom) ?? [];
+            const next = nextExcludedLibraries(current, library);
+            try {
+                writeLocalExcludedLibrariesPref(next);
+            } catch (error) {
+                set(addPopupMessageAtom, {
+                    type: 'error',
+                    title: 'Unable to update library access',
+                    text: 'Your excluded libraries were not saved. Try again.',
+                });
+            }
+            return;
+        }
+
         const profile = get(profileWithPlanAtom);
         if (!profile) {
             set(addPopupMessageAtom, {
@@ -23,12 +58,8 @@ export const toggleExcludedLibraryAtom = atom(
             return;
         }
 
-        const toggledKey = libraryExclusionKey(library);
         const current = profile.excluded_libraries ?? [];
-        const isExcluded = current.some(entry => excludedEntryKey(entry) === toggledKey);
-        const next = isExcluded
-            ? current.filter(entry => excludedEntryKey(entry) !== toggledKey)
-            : [...current, excludedEntryFromLibrary(library)];
+        const next = nextExcludedLibraries(current, library);
 
         set(isUpdatingExcludedLibrariesAtom, true);
 
