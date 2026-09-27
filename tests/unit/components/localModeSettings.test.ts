@@ -10,12 +10,23 @@
  * `localMaxRounds` pref's `0`) and rejecting anything that isn't a
  * non-negative integer without touching the stored value.
  * `showLocalRoundCap` keeps the local-only field out of cloud mode.
+ *
+ * The same file also backs the "Search" settings group: `parseLocalWebSearchMaxUsesInput`
+ * mirrors the round-cap parser for `localWebSearchMaxUses`, and
+ * `localWebSearchCapabilityLabel` / `localWebSearchDescription` turn the
+ * selected model's hosted-search capability into the copy shown next to the
+ * web-search checkbox.
  */
 import { describe, expect, it } from 'vitest';
 import {
+    DEFAULT_LOCAL_WEB_SEARCH_MAX_USES,
     LOCAL_ROUND_CAP_DESCRIPTION,
+    LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION,
+    localWebSearchCapabilityLabel,
+    localWebSearchDescription,
     needsLocalModeRestart,
     parseLocalMaxRoundsInput,
+    parseLocalWebSearchMaxUsesInput,
     showLocalRoundCap,
 } from '../../../react/components/preferences/localModeSettings';
 import { DEFAULT_MAX_ROUNDS } from '@beaver/agent-local/config/localAgentConfig';
@@ -64,5 +75,59 @@ describe('showLocalRoundCap', () => {
 describe('LOCAL_ROUND_CAP_DESCRIPTION', () => {
     it('names the default a blank field falls back to', () => {
         expect(LOCAL_ROUND_CAP_DESCRIPTION).toContain(`default (${DEFAULT_MAX_ROUNDS})`);
+    });
+});
+
+describe('parseLocalWebSearchMaxUsesInput', () => {
+    it('stores blank input as 0, which the search config reads as the default', () => {
+        expect(parseLocalWebSearchMaxUsesInput('')).toBe(0);
+        expect(parseLocalWebSearchMaxUsesInput('   ')).toBe(0);
+    });
+
+    it('parses a positive integer', () => {
+        expect(parseLocalWebSearchMaxUsesInput('5')).toBe(5);
+        expect(parseLocalWebSearchMaxUsesInput('1')).toBe(1);
+    });
+
+    it('rejects zero, negative and non-numeric text without a fallback value', () => {
+        expect(parseLocalWebSearchMaxUsesInput('0')).toBeNull();
+        expect(parseLocalWebSearchMaxUsesInput('-3')).toBeNull();
+        expect(parseLocalWebSearchMaxUsesInput('abc')).toBeNull();
+        expect(parseLocalWebSearchMaxUsesInput('2.5')).toBeNull();
+    });
+});
+
+describe('LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION', () => {
+    it('names the default a blank field falls back to, and that it is per request', () => {
+        expect(LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION).toContain(`default (${DEFAULT_LOCAL_WEB_SEARCH_MAX_USES})`);
+        expect(LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION.toLowerCase()).toContain('request');
+    });
+});
+
+describe('localWebSearchCapabilityLabel', () => {
+    it('names each hosted-search capability', () => {
+        expect(localWebSearchCapabilityLabel('anthropic')).toBe('Anthropic hosted search');
+        expect(localWebSearchCapabilityLabel('openai-responses')).toBe('OpenAI hosted search');
+        expect(localWebSearchCapabilityLabel('openrouter')).toBe('OpenRouter web search');
+    });
+
+    it('says web search is not available when the model has no hosted-search capability', () => {
+        expect(localWebSearchCapabilityLabel(null)).toBe('Not available for this provider');
+    });
+});
+
+describe('localWebSearchDescription', () => {
+    it('names the capability and warns that the provider may bill per search', () => {
+        const description = localWebSearchDescription('anthropic');
+        expect(description).toContain('Anthropic hosted search');
+        expect(description.toLowerCase()).toContain('bill');
+    });
+
+    it('states this preference is the master switch behind the composer toggle', () => {
+        expect(localWebSearchDescription('openrouter').toLowerCase()).toContain('master switch');
+    });
+
+    it('falls back to the unavailable label when the model has no capability', () => {
+        expect(localWebSearchDescription(null)).toContain('Not available for this provider');
     });
 });

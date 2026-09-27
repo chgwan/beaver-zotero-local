@@ -11,12 +11,16 @@ import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/u
 import { remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { refreshCustomModelsAtom } from "../../atoms/models";
 import { localModeEnabledAtom } from "../../atoms/localMode";
-import { localModeStatusAtom } from "../../atoms/localAgentConfig";
+import { localModeStatusAtom, localWebSearchStatusAtom } from "../../atoms/localAgentConfig";
 import { usePreference } from "../../hooks/usePreference";
 import {
+    DEFAULT_LOCAL_WEB_SEARCH_MAX_USES,
     LOCAL_ROUND_CAP_DESCRIPTION,
+    LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION,
+    localWebSearchDescription,
     needsLocalModeRestart,
     parseLocalMaxRoundsInput,
+    parseLocalWebSearchMaxUsesInput,
     showLocalRoundCap,
 } from "./localModeSettings";
 import { DEFAULT_MAX_ROUNDS } from "@beaver/agent-local/config/localAgentConfig";
@@ -73,6 +77,37 @@ const ApiKeysSection: React.FC = () => {
         const parsed = parseLocalMaxRoundsInput(text);
         if (parsed !== null) {
             setPref('localMaxRounds', parsed);
+        }
+    }, []);
+
+    // --- Local Mode: Search ---
+    // Read at the start of every local run, so these apply without a restart
+    // (unlike `localMode`/`localMaxRounds` above).
+    const [scholarlySearchPref, setScholarlySearchPref] = usePreference(() => getPref('localScholarlySearch'));
+    const [openAlexKey, setOpenAlexKey] = useState(() => getPref('openAlexApiKey'));
+    const [semanticScholarKey, setSemanticScholarKey] = useState(() => getPref('semanticScholarApiKey'));
+    const [webSearchPref, setWebSearchPref] = usePreference(() => getPref('localWebSearch'));
+    const [maxUsesText, setMaxUsesText] = useState<string>(() => {
+        const stored = getPref('localWebSearchMaxUses');
+        return stored > 0 ? String(stored) : '';
+    });
+    const localWebSearchStatus = useAtomValue(localWebSearchStatusAtom);
+
+    const handleScholarlySearchToggle = useCallback((checked: boolean) => {
+        setPref('localScholarlySearch', checked);
+        setScholarlySearchPref(checked);
+    }, [setScholarlySearchPref]);
+
+    const handleWebSearchToggle = useCallback((checked: boolean) => {
+        setPref('localWebSearch', checked);
+        setWebSearchPref(checked);
+    }, [setWebSearchPref]);
+
+    const handleMaxUsesChange = useCallback((text: string) => {
+        setMaxUsesText(text);
+        const parsed = parseLocalWebSearchMaxUsesInput(text);
+        if (parsed !== null) {
+            setPref('localWebSearchMaxUses', parsed);
         }
     }, []);
 
@@ -217,6 +252,90 @@ const ApiKeysSection: React.FC = () => {
                     />
                 )}
             </SettingsGroup>
+
+            {/* Search — local-mode only; these prefs do nothing in cloud mode. */}
+            {localModeActive && (
+                <>
+                    <SectionLabel>Search</SectionLabel>
+                    <SettingsGroup className="bg-senary">
+                        <SettingsRow
+                            title="Scholarly search"
+                            description="Let the model look up published research beyond your library. Its search query is sent to OpenAlex and Semantic Scholar."
+                            control={
+                                <input
+                                    type="checkbox"
+                                    aria-label="Scholarly search"
+                                    checked={scholarlySearchPref}
+                                    onChange={(e) => handleScholarlySearchToggle(e.target.checked)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            }
+                        />
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                            <div className="text-sm font-color-secondary mb-1">
+                                Optional. Without a key, OpenAlex allows only a small daily search budget and
+                                may refuse requests once it's spent. A free key raises that.
+                            </div>
+                            <ApiKeyInput
+                                id="openalex-key"
+                                label="OpenAlex API key"
+                                verify={false}
+                                value={openAlexKey}
+                                onChange={setOpenAlexKey}
+                                savePref={(newValue) => handlePrefSave('openAlexApiKey', newValue)}
+                                placeholder="Optional"
+                                linkUrl="https://openalex.org/settings/api"
+                            />
+                        </div>
+                        <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                            <div className="text-sm font-color-secondary mb-1">
+                                Optional. Raises Semantic Scholar's shared rate limit for these requests.
+                            </div>
+                            <ApiKeyInput
+                                id="semantic-scholar-key"
+                                label="Semantic Scholar API key"
+                                verify={false}
+                                value={semanticScholarKey}
+                                onChange={setSemanticScholarKey}
+                                savePref={(newValue) => handlePrefSave('semanticScholarApiKey', newValue)}
+                                placeholder="Optional"
+                                linkUrl="https://www.semanticscholar.org/product/api"
+                            />
+                        </div>
+                        <SettingsRow
+                            hasBorder
+                            title="Web search"
+                            description={localWebSearchDescription(localWebSearchStatus.kind)}
+                            control={
+                                <input
+                                    type="checkbox"
+                                    aria-label="Web search"
+                                    checked={webSearchPref}
+                                    onChange={(e) => handleWebSearchToggle(e.target.checked)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            }
+                        />
+                        <SettingsRow
+                            hasBorder
+                            title="Max searches per request"
+                            description={LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION}
+                            control={
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={maxUsesText}
+                                    onChange={(e) => handleMaxUsesChange(e.target.value)}
+                                    placeholder={String(DEFAULT_LOCAL_WEB_SEARCH_MAX_USES)}
+                                    aria-label="Max searches per request"
+                                    className="chat-input text-base font-color-primary"
+                                    style={{ width: '80px', textAlign: 'right' }}
+                                />
+                            }
+                        />
+                    </SettingsGroup>
+                </>
+            )}
 
             <SectionDescription>
                 {localModeActive ? (
