@@ -211,3 +211,10 @@ pref("localMaxRounds", 0);
 // Read once at plugin startup in local mode, so a change applies on the next
 // plugin reload. An invalid value makes no library searchable.
 pref("localExcludedLibraries", "[]");
+// Local-mode literature search (OpenAlex and Semantic Scholar). Read at the
+// start of every local run, so changes apply without a restart. The API keys
+// are optional; without one, OpenAlex allows only a small daily budget and
+// Semantic Scholar a shared rate limit.
+pref("localScholarlySearch", true);
+pref("openAlexApiKey", "");
+pref("semanticScholarApiKey", "");
