@@ -219,8 +219,8 @@ pref("localScholarlySearch", true);
 pref("openAlexApiKey", "");
 pref("semanticScholarApiKey", "");
 // Local-mode web search through the model provider's own hosted search tool
-// (Anthropic, OpenRouter). Off by default because the provider may bill per
-// search. `localWebSearchMaxUses` caps searches per provider request. Both are
-// read at the start of every local run.
+// (Anthropic, OpenAI, OpenRouter). Off by default because the provider may
+// bill per search. `localWebSearchMaxUses` caps searches per provider
+// request. Both are read at the start of every local run.
 pref("localWebSearch", false);
 pref("localWebSearchMaxUses", 3);
