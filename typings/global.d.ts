@@ -94,6 +94,13 @@ declare namespace Zotero {
         const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
         const voiceHarness: import("../src/services/voice/developmentHarness").DevelopmentVoiceHarness | undefined;
         const pluginVersion: string;
+        /**
+         * Local mode, read once from the `localMode` pref at plugin startup and
+         * fixed until the next plugin load. While true nothing may contact
+         * Beaver's servers. Read this, never the pref, from backend-access and
+         * account code.
+         */
+        const localMode: boolean | undefined;
 
         const data: {
             env: "development" | "production";

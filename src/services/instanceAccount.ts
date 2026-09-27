@@ -13,6 +13,10 @@ import {
     setSupabaseFetchAdapter,
 } from "@beaver/agent-core/transport/supabaseClient";
 import { setCredentialAdapter } from "@beaver/agent-core/transport/credentials";
+import {
+    BackendAccessBlockedError,
+    setBackendAccessPolicy,
+} from "@beaver/agent-core/transport/backendAccessPolicy";
 import { setTransportConfig, getTransportConfig } from "@beaver/agent-core/transport/config";
 import { isCredentialsBlockedError } from "@beaver/agent-core/types/apiErrors";
 import {
@@ -71,6 +75,93 @@ const freeze = <T>(value: T): T => {
     return value;
 };
 
+/** Library scope key shared by profile and local exclusion entries. */
+const excludedLibraryKey = (entry: ExcludedLibrary): string =>
+    entry.type === "group" ? `group:${entry.group_id}` : "user";
+
+const isExcludedLibrary = (value: unknown): value is ExcludedLibrary => {
+    if (!value || typeof value !== "object") return false;
+    const entry = value as { type?: unknown; group_id?: unknown };
+    return (
+        entry.type === "user" ||
+        (entry.type === "group" && typeof entry.group_id === "number")
+    );
+};
+
+/**
+ * Read the local-mode exclusion list from the `localExcludedLibraries` pref.
+ *
+ * An unreadable value must not stop the plugin from starting, so a pref that is
+ * not a JSON array counts as an empty list and malformed entries are skipped.
+ * That means every library the entry would have covered stays searchable, so
+ * each case is reported through `Zotero.logError` for the user to see in the
+ * error console. The preferences UI only ever writes well-formed lists; this
+ * path is reached by editing the pref by hand.
+ */
+function readLocalExcludedLibraries(): ExcludedLibrary[] {
+    const raw = getPref("localExcludedLibraries");
+    if (raw === undefined || raw === "") return [];
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(String(raw));
+    } catch {
+        parsed = undefined;
+    }
+    if (!Array.isArray(parsed)) {
+        Zotero.logError(
+            new Error(
+                "Beaver: the localExcludedLibraries preference is not a JSON array; no libraries are excluded in local mode.",
+            ),
+        );
+        return [];
+    }
+    const entries = parsed.filter(isExcludedLibrary);
+    if (entries.length !== parsed.length) {
+        Zotero.logError(
+            new Error(
+                "Beaver: skipped malformed entries in the localExcludedLibraries preference.",
+            ),
+        );
+    }
+    return entries.map((entry) =>
+        entry.type === "group"
+            ? { type: "group", group_id: entry.group_id }
+            : { type: "user" },
+    );
+}
+
+/** The local user and group libraries, in the shape the account publishes. */
+function readLocalLibraries(): ZoteroLibrary[] {
+    return Zotero.Libraries.getAll()
+        .filter(
+            (lib) => lib.libraryType === "user" || lib.libraryType === "group",
+        )
+        .map(
+            (lib) =>
+                ({
+                    library_id: lib.libraryID,
+                    group_id: lib.isGroup ? lib.id : null,
+                    library_ref:
+                        libraryRefForLibraryID(lib.libraryID) ?? undefined,
+                    name: lib.name,
+                    is_group: lib.isGroup,
+                    type: lib.libraryType,
+                    type_id: lib.libraryTypeID,
+                    read_only: !lib.editable || !lib.filesEditable,
+                }) as ZoteroLibrary,
+        );
+}
+
+export interface InstanceAccountOptions {
+    /**
+     * Local mode: no Beaver account at all. The account never creates or reads
+     * the Supabase client, publishes the local libraries as its scope (minus
+     * the `localExcludedLibraries` pref), and grants no cloud entitlements.
+     * Fixed for the lifetime of the instance.
+     */
+    localMode?: boolean;
+}
+
 /** One account, refresh pipeline and access authority for the plugin lifetime. */
 export class InstanceAccount {
     private snapshot: AccountSnapshot = {
@@ -109,7 +200,8 @@ export class InstanceAccount {
     private observingNetwork = false;
     private readonly networkObserver = {
         observe: (_subject: unknown, _topic: string, state: string) => {
-            if (this.disposed || !this.snapshot.session) return;
+            if (this.localMode || this.disposed || !this.snapshot.session)
+                return;
             if (state === "offline") {
                 if (this.timer) clearTimeout(this.timer);
                 this.timer = undefined;
@@ -129,11 +221,14 @@ export class InstanceAccount {
     readonly realtime: InstanceRealtime;
     readonly auth: SupabaseClient["auth"];
     readonly client: SupabaseClient;
+    private readonly localMode: boolean;
 
     constructor(
         private sdk: SupabaseClient = supabase,
         private stopNetwork: () => void = () => {},
+        options: InstanceAccountOptions = {},
     ) {
+        this.localMode = options.localMode === true;
         this.auth = new Proxy({} as SupabaseClient["auth"], {
             get: (_target, key) => {
                 if (
@@ -141,6 +236,14 @@ export class InstanceAccount {
                         String(key),
                     )
                 ) {
+                    if (this.localMode) {
+                        return async () => ({
+                            data: {},
+                            error: new BackendAccessBlockedError(
+                                `auth.${String(key)}`,
+                            ),
+                        });
+                    }
                     return (...args: unknown[]) =>
                         this.authCommand(String(key), args);
                 }
@@ -148,6 +251,7 @@ export class InstanceAccount {
                     return async (...args: unknown[]) => {
                         const generation = this.snapshot.generation;
                         if (
+                            this.localMode ||
                             this.pendingAuth ||
                             this.disposed ||
                             (this.snapshot.initialized &&
@@ -207,6 +311,10 @@ export class InstanceAccount {
     }
 
     start(): void {
+        if (this.localMode) {
+            this.startLocal();
+            return;
+        }
         if (this.authSubscription || this.disposed) return;
         if (typeof Services !== "undefined" && Services.obs?.addObserver) {
             Services.obs.addObserver(
@@ -229,6 +337,21 @@ export class InstanceAccount {
                     this.acceptSession(session);
             },
         ).data.subscription;
+    }
+    /**
+     * Publish the local libraries as a ready scope with no session. Nothing
+     * subscribes to auth, the network or realtime, so no Supabase client is
+     * created and nothing reaches Beaver's servers.
+     */
+    private startLocal(): void {
+        if (this.disposed || this.snapshot.initialized) return;
+        this.snapshot.initialized = true;
+        this.snapshot.session = null;
+        this.snapshot.data = null;
+        this.snapshot.libraries = copy(readLocalLibraries());
+        this.snapshot.scopeReady = true;
+        this.snapshot.status = { kind: "ok" };
+        this.publish();
     }
     getSnapshot(): AccountSnapshot {
         return copy(this.snapshot);
@@ -275,29 +398,32 @@ export class InstanceAccount {
         const profile = this.snapshot.data?.profile;
         const previousSearchAccess = beaver.hasSearchIndexAccess;
         const excluded = new Set(
-            (profile?.excluded_libraries ?? []).map((entry) =>
-                entry.type === "group" ? `group:${entry.group_id}` : "user",
-            ),
+            (this.localMode
+                ? readLocalExcludedLibraries()
+                : (profile?.excluded_libraries ?? [])
+            ).map(excludedLibraryKey),
         );
+        // Local mode has a scope without a session; otherwise scope requires
+        // the signed-in account whose profile supplied it.
+        const scopeReady =
+            this.snapshot.scopeReady &&
+            (this.localMode || !!this.snapshot.session);
         const previous = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,
             beaver.hasOcrAccess,
             beaver.hasSearchIndexAccess,
         ]);
-        beaver.searchableLibraryIds =
-            this.snapshot.scopeReady && this.snapshot.session
-                ? this.snapshot.libraries
-                      .filter(
-                          (lib) =>
-                              !excluded.has(
-                                  lib.is_group
-                                      ? `group:${lib.group_id}`
-                                      : "user",
-                              ),
-                      )
-                      .map((lib) => lib.library_id)
-                : [];
+        beaver.searchableLibraryIds = scopeReady
+            ? this.snapshot.libraries
+                  .filter(
+                      (lib) =>
+                          !excluded.has(
+                              lib.is_group ? `group:${lib.group_id}` : "user",
+                          ),
+                  )
+                  .map((lib) => lib.library_id)
+            : [];
         const consent = readCloudConsent(this.snapshot.session?.user.id);
         this.snapshot.cloudConsent = consent;
         const accepted = consent === "accepted";
@@ -309,8 +435,7 @@ export class InstanceAccount {
             accepted && !!this.snapshot.session && !!profile?.has_ocr_access;
         beaver.hasSearchIndexAccess =
             accepted && !!this.snapshot.session && !!profile?.has_search_index_access;
-        beaver.libraryScopeInitialized =
-            this.snapshot.scopeReady && !!this.snapshot.session;
+        beaver.libraryScopeInitialized = scopeReady;
         const next = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,
@@ -466,7 +591,8 @@ export class InstanceAccount {
     }
 
     refresh(force = false): Promise<void> {
-        if (this.disposed || !this.snapshot.session) return Promise.resolve();
+        if (this.localMode || this.disposed || !this.snapshot.session)
+            return Promise.resolve();
         if (this.isOffline()) {
             this.networkObserver.observe(
                 null,
@@ -515,27 +641,7 @@ export class InstanceAccount {
                     this.refreshAgain = this.settingsPending === null;
                     return;
                 }
-                const libraries = Zotero.Libraries.getAll()
-                    .filter(
-                        (lib) =>
-                            lib.libraryType === "user" ||
-                            lib.libraryType === "group",
-                    )
-                    .map(
-                        (lib) =>
-                            ({
-                                library_id: lib.libraryID,
-                                group_id: lib.isGroup ? lib.id : null,
-                                library_ref:
-                                    libraryRefForLibraryID(lib.libraryID) ??
-                                    undefined,
-                                name: lib.name,
-                                is_group: lib.isGroup,
-                                type: lib.libraryType,
-                                type_id: lib.libraryTypeID,
-                                read_only: !lib.editable || !lib.filesEditable,
-                            }) as ZoteroLibrary,
-                    );
+                const libraries = readLocalLibraries();
                 const email = this.snapshot.session?.user.email;
                 const oldEmail = getPref("userEmail");
                 if (email && oldEmail && email !== oldEmail)
@@ -606,6 +712,7 @@ export class InstanceAccount {
         return promise;
     }
     async claimPreSyncThreads(): Promise<void> {
+        if (this.localMode) return;
         const generation = this.snapshot.generation;
         const userId = this.snapshot.session?.user.id;
         if (!userId) return;
@@ -733,6 +840,8 @@ export class InstanceAccount {
         this.authSubscription?.unsubscribe();
         this.listeners.clear();
         this.stopNetwork();
+        // Local mode never created a client; touching the SDK here would.
+        if (this.localMode) return;
         await disposeSupabaseClient();
         await this.sdk.removeAllChannels();
     }
@@ -740,6 +849,11 @@ export class InstanceAccount {
 
 export function createInstanceAccount(): InstanceAccount {
     prepareServiceRealm();
+    // Local mode is fixed at plugin startup (`onStartup` sets it before this
+    // runs). This probe covers the plugin realm's copy of the transport layer;
+    // it must be in place before anything can reach the Supabase client.
+    const localMode = Zotero.Beaver?.localMode === true;
+    setBackendAccessPolicy(() => !Zotero.Beaver?.localMode);
     setTransportConfig({
         apiBaseUrl: process.env.API_BASE_URL ?? "",
         supabaseUrl: process.env.SUPABASE_URL ?? "",
@@ -752,7 +866,9 @@ export function createInstanceAccount(): InstanceAccount {
     setSupabaseFetchAdapter((input, init) =>
         fetch(input, { ...init, signal: init?.signal ?? lifetime.signal }),
     );
-    const service = new InstanceAccount(supabase, () => lifetime.abort());
+    const service = new InstanceAccount(supabase, () => lifetime.abort(), {
+        localMode,
+    });
     setCredentialAdapter({
         auth: service.auth,
         getGeneration: () => service.getGeneration(),

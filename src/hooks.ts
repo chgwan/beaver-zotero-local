@@ -299,6 +299,10 @@ async function onStartup() {
     // -------- Store plugin version --------
     addon.pluginVersion = version;
     addon.preferences ??= new InstancePreferences();
+    // Fixed for this plugin load: the account and the backend access policy
+    // read this flag, never the pref, so toggling the pref takes effect on the
+    // next plugin load instead of cutting off a live session.
+    addon.localMode = getPref('localMode') === true;
     addon.account ??= createInstanceAccount();
     addon.threads.start(addon.account);
     addon.account.start();
