@@ -134,10 +134,9 @@ describe('createOpenAiResponsesClient request', () => {
         expect(bodyOf(fetchMock).reasoning).toEqual({ effort: 'high' });
     });
 
-    it('translates the transcript into instructions and input items', async () => {
+    it('translates history turns without provider items into instructions and input items', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse(completed()));
         vi.stubGlobal('fetch', fetchMock);
-        const reasoningItem = { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'enc' };
         await createOpenAiResponsesClient().streamTurn(
             turn({
                 messages: [
@@ -146,7 +145,6 @@ describe('createOpenAiResponsesClient request', () => {
                     {
                         role: 'assistant',
                         content: 'Searching.',
-                        providerBlocks: [reasoningItem],
                         toolCalls: [
                             { id: 'call_1', name: 'zotero_search', args: { q: 'x' }, rawArgs: '{"q":"x"}', parseError: null },
                             { id: 'call_2', name: 'zotero_search', args: {}, rawArgs: '{bad', parseError: 'bad' },
@@ -165,7 +163,6 @@ describe('createOpenAiResponsesClient request', () => {
         expect(sent.instructions).toBe('Be helpful.');
         expect(sent.input).toEqual([
             { role: 'user', content: 'Find papers.' },
-            reasoningItem,
             { role: 'assistant', content: 'Searching.' },
             { type: 'function_call', call_id: 'call_1', name: 'zotero_search', arguments: '{"q":"x"}' },
             { type: 'function_call', call_id: 'call_2', name: 'zotero_search', arguments: '{}' },
@@ -173,6 +170,36 @@ describe('createOpenAiResponsesClient request', () => {
             { type: 'function_call_output', call_id: 'call_2', output: 'result 2' },
             { role: 'assistant', content: 'Done.' },
             { role: 'user', content: 'Thanks.' },
+        ]);
+    });
+
+    it('replays a turn with provider items verbatim, in place of its text and calls', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(completed()));
+        vi.stubGlobal('fetch', fetchMock);
+        const items = [
+            { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'enc' },
+            { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'zotero_search', arguments: '{"q":"x"}', status: 'completed' },
+        ];
+        await createOpenAiResponsesClient().streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'Find papers.' },
+                    {
+                        role: 'assistant',
+                        content: 'ignored text',
+                        providerBlocks: items,
+                        toolCalls: [{ id: 'call_1', name: 'zotero_search', args: { q: 'x' }, rawArgs: '{"q":"x"}', parseError: null }],
+                    },
+                    { role: 'tool', content: 'result 1', toolCallId: 'call_1' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        expect(bodyOf(fetchMock).input).toEqual([
+            { role: 'user', content: 'Find papers.' },
+            ...items,
+            { type: 'function_call_output', call_id: 'call_1', output: 'result 1' },
         ]);
     });
 
@@ -295,7 +322,6 @@ describe('createOpenAiResponsesClient stream', () => {
         expect(result.finishReason).toBe('stop');
         expect(result.text).toBe('Let me check.\n\nFound it.');
         expect(h.onTextDelta.mock.calls.at(-1)?.[0]).toBe('Let me check.\n\nFound it.');
-        expect(result.providerBlocks).toBeUndefined();
     });
 
     it('warns when a hosted search fails', async () => {
@@ -344,22 +370,118 @@ describe('createOpenAiResponsesClient stream', () => {
         ]);
     });
 
-    it('returns finished reasoning items with encrypted content for replay', async () => {
+    it('records every finished output item in order and replays them before the tool results', async () => {
         const reasoning = { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'gAAA' };
+        const search = { id: 'ws_1', type: 'web_search_call', status: 'completed', action: { type: 'search', query: 'q' } };
+        const message = {
+            id: 'msg_1',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            phase: 'commentary',
+            content: [{ type: 'output_text', text: 'Checking.', annotations: [] }],
+        };
+        const call = { id: 'fc_1', type: 'function_call', status: 'completed', call_id: 'call_a', name: 'zotero_search', arguments: '{"query":"x"}' };
+        const fetchMock = vi.fn().mockResolvedValue(
+            sseResponse(
+                ev({ type: 'response.output_item.added', output_index: 0, item: { id: 'rs_1', type: 'reasoning', summary: [] } }),
+                ev({ type: 'response.output_item.done', output_index: 0, item: reasoning }),
+                ev({ type: 'response.output_item.added', output_index: 1, item: { id: 'ws_1', type: 'web_search_call', status: 'in_progress' } }),
+                ev({ type: 'response.output_item.done', output_index: 1, item: search }),
+                ev({ type: 'response.output_item.added', output_index: 2, item: { id: 'msg_1', type: 'message', role: 'assistant', content: [] } }),
+                ev({ type: 'response.output_text.delta', item_id: 'msg_1', output_index: 2, content_index: 0, delta: 'Checking.' }),
+                ev({ type: 'response.output_item.done', output_index: 2, item: message }),
+                ev({ type: 'response.output_item.added', output_index: 3, item: { ...call, status: 'in_progress', arguments: '' } }),
+                ev({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 3, delta: '{"query":' }),
+                ev({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 3, delta: '"x"}' }),
+                ev({ type: 'response.output_item.done', output_index: 3, item: call }),
+                completed()
+            )
+        );
+        vi.stubGlobal('fetch', fetchMock);
+        const client = createOpenAiResponsesClient();
+        const result = await client.streamTurn(turn(), handlers(), signal());
+        expect(result.providerBlocks).toEqual([reasoning, search, message, call]);
+
+        await client.streamTurn(
+            turn({
+                messages: [
+                    { role: 'user', content: 'hi' },
+                    {
+                        role: 'assistant',
+                        content: `${result.text}\n\nSources:\n- [A](https://a.example)`,
+                        toolCalls: result.toolCalls,
+                        providerBlocks: result.providerBlocks,
+                    },
+                    { role: 'tool', content: 'found', toolCallId: 'call_a' },
+                ],
+            }),
+            handlers(),
+            signal()
+        );
+        expect(bodyOf(fetchMock, 1).input).toEqual([
+            { role: 'user', content: 'hi' },
+            reasoning,
+            search,
+            message,
+            call,
+            { type: 'function_call_output', call_id: 'call_a', output: 'found' },
+        ]);
+    });
+
+    it('records a turn without reasoning, and drops reasoning items that have no encrypted content', async () => {
+        const message = { id: 'msg_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Hi', annotations: [] }] };
+        const call = { id: 'fc_1', type: 'function_call', status: 'completed', call_id: 'call_a', name: 'list_items', arguments: '{}' };
         vi.stubGlobal(
             'fetch',
             vi.fn().mockResolvedValue(
                 sseResponse(
-                    ev({ type: 'response.output_item.added', output_index: 0, item: { id: 'rs_1', type: 'reasoning', summary: [] } }),
-                    ev({ type: 'response.output_item.done', output_index: 0, item: reasoning }),
-                    ev({ type: 'response.output_item.done', output_index: 1, item: { id: 'rs_2', type: 'reasoning', summary: [] } }),
-                    ev({ type: 'response.output_text.delta', item_id: 'msg_1', output_index: 2, content_index: 0, delta: 'Hi' }),
+                    ev({ type: 'response.output_item.done', output_index: 0, item: { id: 'rs_2', type: 'reasoning', summary: [] } }),
+                    ev({ type: 'response.output_text.delta', item_id: 'msg_1', output_index: 1, content_index: 0, delta: 'Hi' }),
+                    ev({ type: 'response.output_item.done', output_index: 1, item: message }),
+                    ev({ type: 'response.output_item.done', output_index: 2, item: call }),
                     completed()
                 )
             )
         );
         const result = await createOpenAiResponsesClient().streamTurn(turn(), handlers(), signal());
-        expect(result.providerBlocks).toEqual([reasoning]);
+        expect(result.providerBlocks).toEqual([message, call]);
+    });
+
+    it('replays a recorded call whose arguments did not parse as an empty JSON object', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    ev({ type: 'response.output_item.added', output_index: 0, item: { id: 'fc_1', type: 'function_call', call_id: 'call_a', name: 'zotero_search', arguments: '' } }),
+                    ev({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '{"query":' }),
+                    ev({ type: 'response.output_item.done', output_index: 0, item: { id: 'fc_1', type: 'function_call', call_id: 'call_a', name: 'zotero_search', arguments: '{"query":' } }),
+                    completed()
+                )
+            )
+        );
+        const result = await createOpenAiResponsesClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls[0].parseError).toBeTruthy();
+        expect(result.providerBlocks).toEqual([
+            { id: 'fc_1', type: 'function_call', call_id: 'call_a', name: 'zotero_search', arguments: '{}' },
+        ]);
+    });
+
+    it('records a call whose item never finished, so its tool result still has a call to answer', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    ev({ type: 'response.output_item.added', output_index: 0, item: { id: 'fc_1', type: 'function_call', call_id: 'call_a', name: 'list_items', arguments: '' } }),
+                    ev({ type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '{"limit":2}' }),
+                    ev({ type: 'response.incomplete', response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } })
+                )
+            )
+        );
+        const result = await createOpenAiResponsesClient().streamTurn(turn(), handlers(), signal());
+        expect(result.providerBlocks).toEqual([
+            { type: 'function_call', call_id: 'call_a', name: 'list_items', arguments: '{"limit":2}' },
+        ]);
     });
 
     it('streams reasoning summary text as thinking', async () => {
