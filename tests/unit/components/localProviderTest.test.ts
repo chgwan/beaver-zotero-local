@@ -74,6 +74,27 @@ describe('testLocalProvider', () => {
         expect(result.message).toMatch(/timed out/i);
     });
 
+    it('reports cancellation, not an error, when the caller aborts externally', async () => {
+        const client: LlmClient = {
+            streamTurn: vi.fn(async (_request, _handlers, signal) => {
+                return new Promise((_resolve, reject) => {
+                    signal.addEventListener('abort', () => {
+                        reject(new LlmRequestError('cancelled', 'aborted'));
+                    });
+                });
+            }),
+        };
+        const controller = new AbortController();
+
+        const resultPromise = testLocalProvider(model, client, undefined, controller.signal);
+        controller.abort();
+        const result = await resultPromise;
+
+        expect(result.ok).toBe(false);
+        expect(result.cancelled).toBe(true);
+        expect(result.message).not.toMatch(/timed out/i);
+    });
+
     it('never includes the api key in the request messages', async () => {
         const secretModel: CustomChatModel = { ...model, api_key: 'super-secret-key' };
         const client: LlmClient = {

@@ -12,19 +12,47 @@ import { LlmRequestError } from '@beaver/agent-local/llm/types';
 export interface LocalProviderTestResult {
     ok: boolean;
     message: string;
+    /**
+     * True when `ok: false` came from the caller's own `externalSignal`
+     * (unmount, or a newer test superseding this one) rather than a real
+     * provider failure or timeout. Callers should discard these silently
+     * instead of showing them as an error.
+     */
+    cancelled?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const TEST_PROMPT = 'Reply with one short sentence to confirm you received this message.';
 
-/** Run one connectivity check against a local/custom provider endpoint. */
+/**
+ * Run one connectivity check against a local/custom provider endpoint.
+ *
+ * `externalSignal` lets the caller cancel the request (component unmount, or
+ * a newer test starting) independently of the timeout; an abort from that
+ * signal is reported as `cancelled`, not as a timeout or provider error.
+ */
 export async function testLocalProvider(
     model: CustomChatModel,
     client: LlmClient,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
+    externalSignal?: AbortSignal,
 ): Promise<LocalProviderTestResult> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
+
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            controller.abort();
+        } else {
+            externalSignal.addEventListener('abort', onExternalAbort);
+        }
+    }
+
     try {
         const result = await client.streamTurn(
             {
@@ -42,6 +70,9 @@ export async function testLocalProvider(
         return { ok: true, message: text || 'The endpoint responded.' };
     } catch (error) {
         if (error instanceof LlmRequestError && error.kind === 'cancelled') {
+            if (!timedOut) {
+                return { ok: false, cancelled: true, message: 'The test was cancelled.' };
+            }
             return {
                 ok: false,
                 message: 'The request timed out. Check the endpoint URL and that the server is running.',
@@ -53,5 +84,6 @@ export async function testLocalProvider(
         };
     } finally {
         clearTimeout(timer);
+        if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
     }
 }
