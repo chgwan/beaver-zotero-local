@@ -13,6 +13,7 @@ import {
 import { whereToStartVisibleAtom } from './whereToStart';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { LOCAL_USER_ID, localModeEnabledAtom } from './localMode';
 
 /**
  * Atom representing the current authentication session
@@ -165,6 +166,14 @@ export const userAtom = selectAtom(
     }
 );
 export const userIdAtom = atom<string | null>((get) => get(userAtom)?.id || null);
+
+/**
+ * The user id a new run is stamped with: the signed-in user's, or
+ * `LOCAL_USER_ID` in local mode, where runs never reach an account.
+ */
+export const runUserIdAtom = atom<string | null>((get) =>
+    get(localModeEnabledAtom) ? LOCAL_USER_ID : get(userIdAtom)
+);
 
 /**
  * Loading state atom to track auth initialization status

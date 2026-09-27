@@ -24,6 +24,7 @@ import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
+import { activeAgentService } from '../runtime/localAgentService';
 import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
@@ -115,7 +116,7 @@ import {
     createStreamActivityTracker,
     streamQuietAtom,
 } from '@beaver/agent-core/run-state/streamActivity';
-import { userIdAtom } from './auth';
+import { runUserIdAtom, userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { maybeShowCitationTipAtom } from './citationTip';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -676,7 +677,7 @@ async function startContinuationRunOwned(
             return;
         }
 
-        const userId = get(userIdAtom);
+        const userId = get(runUserIdAtom);
         if (!userId) {
             logger(`${options.logPrefix}: No user ID found`, 1);
             return;
@@ -807,7 +808,7 @@ async function startAutoRetryRunOwned(
             return;
         }
 
-        const userId = get(userIdAtom);
+        const userId = get(runUserIdAtom);
         if (!userId) {
             logger(`${logPrefix}: No user ID found`, 1);
             return;
@@ -1793,7 +1794,7 @@ export function createWSCallbacks(
         // — retries commit their removal through `POST /truncate` before the
         // run request is sent.
         onThread: (newThreadId: string) => {
-            if (!bindWriter(writer, newThreadId)) { agentService.close(1000, 'Chat ownership changed'); return; }
+            if (!bindWriter(writer, newThreadId)) { activeAgentService().close(1000, 'Chat ownership changed'); return; }
             Zotero.Beaver?.threads?.invalidateViews();
             logger('WS onThread:', { threadId: newThreadId }, 1);
             set(currentThreadIdAtom, newThreadId);
@@ -1838,7 +1839,7 @@ export function createWSCallbacks(
                 return null;
             });
 
-            agentService.close();
+            activeAgentService().close();
             set(isWSChatPendingAtom, false);
             // Clear pending approvals and dismiss diff preview
             set(clearAllPendingApprovalsAtom);
@@ -2344,7 +2345,7 @@ async function executeWSRequest(
 
     connectLoopsInFlight++;
     const result = await connectWithRetry({
-        service: agentService,
+        service: activeAgentService(),
         request,
         callbacks: createWSCallbacks(set, () => attemptsMade, restoreComposer),
         logLabel: `run ${run.id}`,
@@ -2718,7 +2719,7 @@ const sendWSMessage = async (
 
             assertCredentialGeneration(accountGeneration);
             // Get user ID for the run
-            const userId = get(userIdAtom);
+            const userId = get(runUserIdAtom);
             if (!userId) {
                 logger('User ID not found', 1);
                 set(isWSChatPendingAtom, false);
@@ -2841,7 +2842,7 @@ async function startRegenerateRunOwned(
         }
 
         // Get user ID
-        const userId = get(userIdAtom);
+        const userId = get(runUserIdAtom);
         if (!userId) {
             logger(`${logPrefix}: No user ID found`, 1);
             return;
@@ -2896,7 +2897,7 @@ async function startRegenerateRunOwned(
             // failure. The pending flag stays set until cancel resolves so the
             // composer guard keeps blocking new sends during the flush.
             set(activeRunAtom, null);
-            await agentService.cancel();
+            await activeAgentService().cancel();
 
             // The earliest await in this function, and everything after it
             // reads live state: the thread id the truncate is addressed to,
@@ -3427,7 +3428,7 @@ export const closeWSConnectionAtom = atom(null, async (_get, set) => {
     set(abandonActiveRunLocallyAtom);
 
     // Send cancel message and close connection
-    await agentService.cancel();
+    await activeAgentService().cancel();
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
 });
@@ -3453,8 +3454,9 @@ export const closeWSConnectionForShutdownAtom = atom(
     ) => {
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
-        if (!agentService.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
-        agentService.close(1000, reason);
+        const service = activeAgentService();
+        if (!service.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
+        service.close(1000, reason);
         if (options?.rememberInterruptedThread) rememberInterruptedThread(get);
         set(abandonActiveRunLocallyAtom);
     },
@@ -3474,6 +3476,8 @@ function rememberInterruptedThread(get: Getter): void {
     if (!activeRun || !isRunActive(activeRun)) return;
 
     const threadId = get(currentThreadIdAtom) || activeRun.thread_id;
+    // The account's id, not the run's: reopening loads the thread from the
+    // account's history, and a local-mode thread is not stored there.
     const userId = get(userIdAtom);
     if (!threadId || !userId) return;
 

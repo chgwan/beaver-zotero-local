@@ -17,7 +17,7 @@ import {
 import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { agentService } from "@beaver/agent-core/transport/agentService";
+import { activeAgentService } from "../runtime/localAgentService";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
@@ -220,7 +220,7 @@ async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any,
     if (hadActiveWork) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
         // Cancel the WebSocket connection
-        await agentService.cancel();
+        await activeAgentService().cancel();
         if (!isCurrent()) return;
         set(isWSConnectedAtom, false);
         set(isWSReadyAtom, false);

@@ -12,6 +12,7 @@ import { attachThreadProjection } from './runtime/threadProjection';
 import type { WSAgentActionExecuteRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import { ZOTERO_AGENT_NAME, ZOTERO_PLUGIN_CLIENT_TYPE } from '@beaver/agent-core/protocol/agentProtocol';
 import { getTransportConfigurationError, setTransportConfig } from '@beaver/agent-core/transport/config';
+import { setBackendAccessPolicy } from '@beaver/agent-core/transport/backendAccessPolicy';
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
@@ -37,7 +38,8 @@ import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
 import { currentMessageContentAtom, currentReaderAttachmentAtom, currentMessageItemsAtom, addItemToCurrentMessageItemsAtom, removeItemFromMessageAtom } from './atoms/messageComposition';
 import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName } from '@beaver/agent-core/run-state/tableResults';
-import { selectedModelAtom } from './atoms/models';
+import { selectedModelAtom, validateSelectedModelAtom } from './atoms/models';
+import { isLocalMode } from './atoms/localMode';
 import { preferencesRevisionAtom } from './atoms/preferences';
 import { accountGenerationAtom, accountRevisionAtom, isProfileLoadedAtom, profileWithPlanAtom, searchableLibraryIdsAtom } from './atoms/profile';
 import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
@@ -145,6 +147,12 @@ setCredentialAdapter({
     getGeneration: () => instanceAccount.getGeneration(),
     reportSessionRejected: generation => { void instanceAccount.reportSessionRejected(generation); },
 });
+// Local mode reaches no Beaver server. Same probe as the plugin realm's, so
+// both bundles' copies of the transport layer agree.
+setBackendAccessPolicy(() => !Zotero.Beaver?.localMode);
+// Local mode never receives the backend model list, so a remembered hosted
+// model cannot run; fall back to a custom one before the first send.
+if (isLocalMode()) store.set(validateSelectedModelAtom);
 
 // Register the Zotero busy-context snapshot attached to outgoing WS
 // diagnostics, and the sync-pause resume handler released when a mutating
