@@ -84,3 +84,6 @@ export type {
 } from './run/toolReturnMetadata';
 export { fetchJson, HostGate, DEFAULT_TIMEOUT_MS, DEFAULT_MAX_ATTEMPTS } from './search/httpJson';
 export type { HttpJsonOptions, HttpJsonResult, HostGateDeps } from './search/httpJson';
+export { normalizeDoi } from './search/types';
+export type { ScholarlyResult, ScholarlySearchQuery, ScholarlySource, SourceOutcome } from './search/types';
+export { createOpenAlexSource, OPENALEX_MIN_INTERVAL_MS, openAlexGate } from './search/openAlex';
