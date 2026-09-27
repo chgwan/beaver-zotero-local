@@ -7,7 +7,7 @@ import { UserIcon, LogoutIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon
 import { useSetAtom } from 'jotai';
 import { runStatusPopupEnabledAtom } from '../../atoms/runStatusPopup';
 import { profileWithPlanAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
-import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
+import { activePreferencePageTabAtom } from "../../atoms/ui";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
@@ -21,7 +21,16 @@ import LibraryAccessList from "./LibraryAccessList";
 import BackgroundProcessingSection from "./BackgroundProcessingSection";
 import CloudFeaturesBanner from "./CloudFeaturesBanner";
 import { chatLineSpacingAtom, CHAT_LINE_SPACING, type ChatLineSpacing } from '../../atoms/preferences';
+import { localModeEnabledAtom } from '../../atoms/localMode';
+import { isPreferenceTabVisible, resolvePreferenceTab, type VisiblePreferencePageTab } from './preferenceTabs';
 
+interface PreferenceTabDefinition {
+    id: VisiblePreferencePageTab;
+    label: string;
+    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+    /** The page renders its own title row (e.g. to place buttons next to it). */
+    ownsHeader?: boolean;
+}
 
 const PreferencePage: React.FC = () => {
     const [user] = useAtom(userAtom);
@@ -50,6 +59,7 @@ const PreferencePage: React.FC = () => {
     const creditPlan = useAtomValue(creditPlanAtom);
     const hasCreditPlan = useAtomValue(hasCreditPlanAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
 
     // Update local state when atom changes
     React.useEffect(() => {
@@ -162,15 +172,7 @@ const PreferencePage: React.FC = () => {
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
     const quickPromptShortcutLabel = `${Zotero.isMac ? '⌘⌥' : 'Ctrl+Alt'}+${keyboardShortcut}`;
-    type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
-    interface PreferenceTabDefinition {
-        id: VisiblePreferencePageTab;
-        label: string;
-        icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-        /** The page renders its own title row (e.g. to place buttons next to it). */
-        ownsHeader?: boolean;
-    }
-    const tabs = useMemo<PreferenceTabDefinition[]>(() => [
+    const tabs = useMemo<PreferenceTabDefinition[]>(() => ([
         { id: 'general', label: 'General', icon: SettingsIcon },
         { id: 'sync', label: 'Search & Files', icon: SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
@@ -178,8 +180,8 @@ const PreferencePage: React.FC = () => {
         { id: 'models', label: 'API Keys', icon: KeyIcon },
         { id: 'actions', label: 'Actions', icon: ZapIcon, ownsHeader: true },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
-    ], []);
-    const effectiveActiveTab: VisiblePreferencePageTab = activeTab === 'account' ? 'general' : activeTab;
+    ] as PreferenceTabDefinition[]).filter((tab) => isPreferenceTabVisible(tab.id, localMode)), [localMode]);
+    const effectiveActiveTab: VisiblePreferencePageTab = resolvePreferenceTab(activeTab, localMode);
     const activeTabDefinition = tabs.find((tab) => tab.id === effectiveActiveTab) ?? tabs[0];
 
     // The tab list is vertical: Up/Down move between tabs (wrapping), Home/End jump to the ends.
@@ -206,12 +208,15 @@ const PreferencePage: React.FC = () => {
             ?.focus();
     }, [effectiveActiveTab, setActiveTab, tabs]);
 
-    // Backward compatibility for existing entry points that still request "account".
+    // Keep the persisted tab in sync with what's actually shown: corrects the
+    // legacy "account" alias, and redirects away from a tab hidden in this
+    // mode (e.g. a stale "billing" request while running in local mode).
     React.useEffect(() => {
-        if (activeTab === 'account') {
-            setActiveTab('general');
+        const resolved = resolvePreferenceTab(activeTab, localMode);
+        if (resolved !== activeTab) {
+            setActiveTab(resolved);
         }
-    }, [activeTab, setActiveTab]);
+    }, [activeTab, localMode, setActiveTab]);
 
     const planLabel = hasCreditPlan ? `${formatPlanName(creditPlan.plan ?? undefined)} plan` : 'No active plan';
     const accountInitial = user?.email?.trim().charAt(0) || '?';
