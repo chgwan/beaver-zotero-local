@@ -36,6 +36,11 @@ it('does not treat a failed server read as completion', async () => {
     state.history.mockRejectedValue(new Error('offline'));
     expect(await isFinishedChat('requested')).toBe(false);
 });
+it('never treats a local-mode thread as finished, and never reads the backend', async () => {
+    (Zotero as any).Beaver.localMode = true;
+    expect(await isFinishedChat('requested')).toBe(false);
+    expect(state.history).not.toHaveBeenCalled();
+});
 it('rejects a writer acquired while history was loading', async () => {
     state.history.mockImplementation(async () => {
         state.claims.push({ threadId: 'requested' });
