@@ -118,6 +118,7 @@ describe('LocalAgentService.connect', () => {
         expect(buildToolCatalogMock).toHaveBeenCalledWith({
             provider: { provider: true, read_attachment_request: { readAttachment: true } },
             searchableLibraryIds: [1, 2],
+            contextWindow: 1000,
         });
         expect(runLoopMock).toHaveBeenCalledTimes(1);
         const options = runLoopMock.mock.calls[0][0];

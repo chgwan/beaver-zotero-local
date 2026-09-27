@@ -104,6 +104,7 @@ export class LocalAgentService {
                     read_attachment_request: readAttachmentEntry,
                 },
                 searchableLibraryIds,
+                contextWindow: config.model.context_window,
             });
             history = buildRunHistory(store.get(threadRunsAtom), request.thread_id ?? null, {
                 contextWindow: config.model.context_window,

@@ -27,6 +27,7 @@ import type { LocalAgentConfig } from '../config/localAgentConfig';
 import type { AccumulatedToolCall } from '../llm/toolCallAccumulator';
 import { LlmRequestError, type LlmClient, type LlmMessage, type LlmTurnResult, type LlmUsage } from '../llm/types';
 import type { LocalToolCatalog } from '../tools/toolCatalog';
+import { fitTranscript, tokensForChars, transcriptBudget } from './contextBudget';
 import { FrameEmitter, type RoundFrames } from './frameEmitter';
 import { buildSystemPrompt } from './systemPrompt';
 import { buildToolReturnMetadata } from './toolReturnMetadata';
@@ -214,11 +215,16 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             toolNames: catalog.definitions().map((tool) => tool.name),
             customInstructions: options.userPrompt.custom_instructions,
         });
-    const transcript: LlmMessage[] = [
+    let transcript: LlmMessage[] = [
         { role: 'system', content: systemPrompt },
         ...(options.history ?? []),
         { role: 'user', content: renderUserPrompt(options.userPrompt) },
     ];
+
+    // Tool results are what grows a run's transcript; older ones are elided
+    // before any call that would overflow the model's context window.
+    const toolDefinitionTokens = tokensForChars(JSON.stringify(catalog.definitions()).length);
+    const budget = transcriptBudget(config.model.context_window, toolDefinitionTokens);
 
     callbacks.onReady(LOCAL_READY_DATA);
     if (options.threadId === null) {
@@ -228,6 +234,7 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
     try {
         for (let round = 0; round < config.maxRounds; round++) {
             const frames = emitter.beginRound();
+            transcript = fitTranscript(transcript, budget);
             const turn = await streamRound(frames, options, transcript);
             usage.addRequest(turn.usage);
 

@@ -17,7 +17,7 @@ import { validateArgs } from './argValidation';
 import { READ_ONLY_TOOLS, type LocalToolDefinition, type ToolArgs } from './toolSchemas';
 
 export { READ_ONLY_TOOLS };
-export type { LocalToolDefinition, JsonSchema, ToolArgs, ToolRequest } from './toolSchemas';
+export type { LocalToolDefinition, JsonSchema, ToolArgs, ToolRequest, ToolRequestLimits } from './toolSchemas';
 
 /**
  * The structural subset of the host's data-provider map this catalog uses.
@@ -50,6 +50,8 @@ export interface ToolCatalogOptions {
      * own; the catalog uses it only to refuse outright when it is empty.
      */
     searchableLibraryIds: readonly number[];
+    /** The model's context window in tokens, when known; bounds what a read returns. */
+    contextWindow?: number | null;
 }
 
 export interface LocalToolCatalog {
@@ -92,6 +94,7 @@ const responseFailure = (response: Record<string, unknown>): ToolExecutionResult
 
 export function buildToolCatalog(options: ToolCatalogOptions): LocalToolCatalog {
     const { provider, searchableLibraryIds } = options;
+    const limits = { contextWindow: options.contextWindow ?? null };
 
     // Only offer a tool the host can actually serve; an offered-but-unhandled
     // tool is a guaranteed dead end mid-run.
@@ -137,7 +140,7 @@ export function buildToolCatalog(options: ToolCatalogOptions): LocalToolCatalog 
                 return { ok: false, retryable: false, error: `Tool "${name}" is unavailable.` };
             }
 
-            const request = without(tool.buildRequest(args, crypto.randomUUID()), isUndefined);
+            const request = without(tool.buildRequest(args, crypto.randomUUID(), limits), isUndefined);
             const context: AgentDataRequestContext = {
                 signal,
                 receivedAt: Date.now(),

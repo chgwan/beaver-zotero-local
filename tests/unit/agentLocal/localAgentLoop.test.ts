@@ -3,6 +3,7 @@ import { runLocalAgentLoop, type LocalAgentLoopOptions } from '@beaver/agent-loc
 import { LlmRequestError, type LlmTurnResult, type LlmUsage } from '@beaver/agent-local/llm/types';
 import type { AccumulatedToolCall } from '@beaver/agent-local/llm/toolCallAccumulator';
 import type { LocalAgentConfig } from '@beaver/agent-local/config/localAgentConfig';
+import { ELIDED_TOOL_RESULT } from '@beaver/agent-local/run/contextBudget';
 import { ProcessingMode, SubscriptionStatus } from '@beaver/agent-core/types/profile';
 
 const config: LocalAgentConfig = {
@@ -376,6 +377,32 @@ describe('runLocalAgentLoop', () => {
             result_count: 1,
             items: [{ library_id: 1, zotero_key: 'AAA' }],
         });
+    });
+
+    it('elides older tool results before a call that would overflow the context window', async () => {
+        const bigResult = { text: 'x'.repeat(8_000) }; // ~2000 tokens once serialised
+        const catalog = stubCatalog({
+            execute: vi.fn(async (): Promise<any> => ({ ok: true, content: bigResult, text: JSON.stringify(bigResult) })),
+        });
+        const client = scriptedClient([
+            { toolCalls: [call('c0', { query: 'a' })] },
+            { toolCalls: [call('c1', { query: 'b' })] },
+            { toolCalls: [call('c2', { query: 'c' })] },
+            { textChunks: ['Done.'] },
+        ]);
+        await run(client, callbacks, catalog, {
+            config: { ...config, model: { ...config.model, context_window: 8_000 } },
+        });
+
+        const last = client.streamTurn.mock.calls[3][0].messages;
+        const tools = last.filter((m: any) => m.role === 'tool');
+        expect(tools.map((m: any) => m.toolCallId)).toEqual(['c0', 'c1', 'c2']);
+        expect(tools[0].content).toBe(ELIDED_TOOL_RESULT);
+        expect(tools[2].content).toBe(JSON.stringify(bigResult));
+        expect(last[0].role).toBe('system');
+        expect(last[1]).toEqual({ role: 'user', content: 'find papers on x' });
+        // What the renderer shows is unaffected.
+        expect(callbacks.onToolReturn.mock.calls.map(([e]: any) => e.part.content)).toEqual([bigResult, bigResult, bigResult]);
     });
 
     it('finishes with a warning rather than an error at the round cap', async () => {
