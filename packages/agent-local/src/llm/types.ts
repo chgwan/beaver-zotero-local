@@ -28,11 +28,19 @@ export interface LlmStreamHandlers {
 
 export type LlmFinishReason = 'stop' | 'tool_calls' | 'length' | 'unknown';
 
+/** Token accounting for one turn, in the provider-neutral shape the loop sums. */
+export interface LlmUsage {
+    inputTokens: number;
+    outputTokens: number;
+}
+
 export interface LlmTurnResult {
     text: string;
     thinking: string;
     toolCalls: AccumulatedToolCall[];
     finishReason: LlmFinishReason;
+    /** Null when the provider never reported usage for this turn. */
+    usage: LlmUsage | null;
 }
 
 export interface LlmTurnRequest {
@@ -42,6 +50,16 @@ export interface LlmTurnRequest {
 }
 
 export interface LlmClient {
+    /**
+     * Run one turn to completion or rejection.
+     *
+     * Cancellation contract: once `signal` is aborted, `streamTurn` must
+     * reject with `LlmRequestError('cancelled', ...)` rather than resolve
+     * with a partial result — before the request is sent, while it is
+     * in flight, and after the stream ends. A caller that reads `signal`
+     * to distinguish "the user stopped this" from "the provider failed"
+     * must get a consistent answer regardless of when the abort happened.
+     */
     streamTurn(
         request: LlmTurnRequest,
         handlers: LlmStreamHandlers,
@@ -50,7 +68,7 @@ export interface LlmClient {
 }
 
 /** How a provider failure should be described to the user. */
-export type LlmErrorKind = 'auth' | 'rate_limit' | 'server' | 'network' | 'bad_request';
+export type LlmErrorKind = 'auth' | 'rate_limit' | 'server' | 'network' | 'bad_request' | 'cancelled';
 
 export class LlmRequestError extends Error {
     constructor(

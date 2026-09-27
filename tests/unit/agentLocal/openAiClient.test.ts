@@ -220,4 +220,80 @@ describe('createOpenAiClient', () => {
             content: '{"results":[]}',
         });
     });
+
+    it('captures usage from a final chunk with empty choices', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
+                    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                    'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 3 });
+    });
+
+    it('reports null usage when the provider never sends it', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(result.usage).toBeNull();
+    });
+
+    it('never requests stream_options', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n'));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(turn(), handlers(), signal());
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('stream_options');
+    });
+
+    it('rejects as cancelled when the request is aborted before fetch resolves', async () => {
+        const controller = new AbortController();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockImplementation(() => {
+                controller.abort();
+                const abortError = new Error('The operation was aborted.');
+                abortError.name = 'AbortError';
+                return Promise.reject(abortError);
+            })
+        );
+        const failure = await createOpenAiClient()
+            .streamTurn(turn(), handlers(), controller.signal)
+            .catch((e) => e);
+        expect(failure).toBeInstanceOf(LlmRequestError);
+        expect(failure.kind).toBe('cancelled');
+    });
+
+    it('rejects as cancelled when the caller aborts mid-stream', async () => {
+        const controller = new AbortController();
+        const onTextDelta = vi.fn(() => controller.abort());
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
+                    'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
+                    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                    'data: [DONE]\n\n'
+                )
+            )
+        );
+        const failure = await createOpenAiClient()
+            .streamTurn(turn(), { onTextDelta, onThinkingDelta: vi.fn() }, controller.signal)
+            .catch((e) => e);
+        expect(failure).toBeInstanceOf(LlmRequestError);
+        expect(failure.kind).toBe('cancelled');
+    });
 });
