@@ -335,7 +335,7 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
     let transcript: LlmMessage[] = [
         { role: 'system', content: systemPrompt },
         ...(options.history ?? []),
-        { role: 'user', content: renderUserPrompt(options.userPrompt) },
+        { role: 'user', content: renderUserPrompt(options.userPrompt, { webSearchRequested: options.webSearch?.enabled === true }) },
     ];
 
     // Tool results are what grows a run's transcript; older ones are elided

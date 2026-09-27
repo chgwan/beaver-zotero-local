@@ -103,6 +103,17 @@ describe('renderUserPrompt', () => {
         expect(text).toContain('Selected text (page 7): "the vanishing gradient"');
     });
 
+    it('adds a hint that the user asked for web search only when requested', () => {
+        const withHint = renderUserPrompt({ content: 'Latest news on this' }, { webSearchRequested: true });
+        expect(withHint).toContain('The user asked you to search the web for this request.');
+
+        const withoutHint = renderUserPrompt({ content: 'Latest news on this' });
+        expect(withoutHint).not.toContain('search the web');
+
+        const explicitlyOff = renderUserPrompt({ content: 'Latest news on this' }, { webSearchRequested: false });
+        expect(explicitlyOff).not.toContain('search the web');
+    });
+
     it('lists selected collections and a bounded number of selected items', () => {
         const selection = Array.from({ length: 25 }, (_, i) => ({ library_id: 1, library_ref: 'u', zotero_key: `KEY${String(i).padStart(5, '0')}` }));
         const text = renderUserPrompt({

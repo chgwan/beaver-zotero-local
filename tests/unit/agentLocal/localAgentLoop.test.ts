@@ -762,6 +762,20 @@ describe('runLocalAgentLoop hosted web search', () => {
         for (const request of requests) expect(request.webSearch).toEqual({ enabled: true, maxUses: 3 });
     });
 
+    it('tells the model the user asked for web search when it is enabled for the run', async () => {
+        const { client, requests } = webClient([{ text: 'Done.' }]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const user = requests[0].messages[1];
+        expect(user.content).toContain('The user asked you to search the web for this request.');
+    });
+
+    it('does not mention web search when it is not enabled for the run', async () => {
+        const { client, requests } = webClient([{ text: 'Done.' }]);
+        await run(client, callbacks, stubCatalog());
+        const user = requests[0].messages[1];
+        expect(user.content).not.toContain('search the web');
+    });
+
     it('continues a paused turn instead of finishing, within the same round', async () => {
         const paused = [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'q' } }];
         const { client, requests } = webClient([
