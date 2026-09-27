@@ -95,6 +95,72 @@ describe('createAnthropicClient', () => {
         });
     });
 
+    it('ignores input_json_delta from a server_tool_use block and its result block, keeping surrounding text intact', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'event: content_block_start\ndata: {"index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search"}}\n\n',
+                    'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"x\\"}"}}\n\n',
+                    'event: content_block_start\ndata: {"index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]}}\n\n',
+                    'event: content_block_start\ndata: {"index":2,"content_block":{"type":"text","text":""}}\n\n',
+                    'event: content_block_delta\ndata: {"index":2,"delta":{"type":"text_delta","text":"Done."}}\n\n',
+                    'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}\n\n',
+                    STOP
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls).toEqual([]);
+        expect(result.text).toBe('Done.');
+        expect(result.finishReason).toBe('stop');
+    });
+
+    it('keeps a real tool_use call and drops a sibling server_tool_use block from the same stream', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'event: content_block_start\ndata: {"index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search"}}\n\n',
+                    'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"ignored\\"}"}}\n\n',
+                    'event: content_block_start\ndata: {"index":1,"content_block":{"type":"tool_use","id":"toolu_2","name":"zotero_search"}}\n\n',
+                    'event: content_block_delta\ndata: {"index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"que"}}\n\n',
+                    'event: content_block_delta\ndata: {"index":1,"delta":{"type":"input_json_delta","partial_json":"ry\\":\\"y\\"}"}}\n\n',
+                    'event: message_delta\ndata: {"delta":{"stop_reason":"tool_use"}}\n\n'
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(
+            turn({ tools: [ZOTERO_SEARCH_TOOL] }),
+            handlers(),
+            signal()
+        );
+        expect(result.toolCalls).toHaveLength(1);
+        expect(result.toolCalls[0]).toMatchObject({
+            id: 'toolu_2',
+            name: 'zotero_search',
+            args: { query: 'y' },
+            parseError: null,
+        });
+        expect(result.finishReason).toBe('tool_calls');
+    });
+
+    it('does not report tool_calls as the finish reason when only server-tool blocks streamed', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'event: content_block_start\ndata: {"index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search"}}\n\n',
+                    'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"x\\"}"}}\n\n',
+                    STOP
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(turn(), handlers(), signal());
+        expect(result.toolCalls).toHaveLength(0);
+        expect(result.finishReason).toBe('unknown');
+    });
+
     it('streams thinking blocks separately from text', async () => {
         vi.stubGlobal(
             'fetch',

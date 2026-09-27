@@ -209,6 +209,15 @@ export function createAnthropicClient(): LlmClient {
             }
 
             const accumulator = new ToolCallAccumulator();
+            // A server tool (`server_tool_use`, e.g. hosted web search) streams
+            // `input_json_delta` in the same shape as a `tool_use` block this
+            // client executes, but for a call this client never issued and has
+            // no handler for. The block type is only known from its
+            // `content_block_start`, so it is tracked per index and consulted
+            // before any delta is allowed to reach the accumulator — anything
+            // this client doesn't recognize as `tool_use` is dropped rather
+            // than turning into a phantom call with an empty name.
+            const blockTypes = new Map<number, string>();
             let text = '';
             let thinking = '';
             let finishReason: LlmFinishReason = 'unknown';
@@ -244,14 +253,21 @@ export function createAnthropicClient(): LlmClient {
 
                 if (type === 'content_block_start') {
                     const block = frame.content_block ?? {};
+                    const index = frame.index ?? 0;
+                    blockTypes.set(index, block.type);
                     if (block.type === 'tool_use') {
-                        accumulator.open(frame.index ?? 0, { id: block.id, name: block.name });
+                        accumulator.open(index, { id: block.id, name: block.name });
                     }
                     continue;
                 }
 
                 if (type === 'content_block_delta') {
+                    const index = frame.index ?? 0;
                     const delta = frame.delta ?? {};
+                    // `text_delta`/`thinking_delta` are already scoped to their
+                    // block type by the Anthropic protocol itself — unlike
+                    // `input_json_delta`, no other block type emits them — so
+                    // no separate block-type check is needed here.
                     if (delta.type === 'text_delta' && typeof delta.text === 'string') {
                         text += delta.text;
                         handlers.onTextDelta(text);
@@ -263,9 +279,10 @@ export function createAnthropicClient(): LlmClient {
                         handlers.onThinkingDelta(thinking);
                     } else if (
                         delta.type === 'input_json_delta' &&
-                        typeof delta.partial_json === 'string'
+                        typeof delta.partial_json === 'string' &&
+                        blockTypes.get(index) === 'tool_use'
                     ) {
-                        accumulator.appendArguments(frame.index ?? 0, delta.partial_json);
+                        accumulator.appendArguments(index, delta.partial_json);
                     }
                     continue;
                 }
