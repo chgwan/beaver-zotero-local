@@ -206,3 +206,7 @@ pref("localMode", false);
 // Round cap for one local run: how many tool-calling turns before the loop
 // stops and reports. 0 or unset uses the built-in default.
 pref("localMaxRounds", 0);
+// Libraries local mode keeps away from the model: a JSON array in the same
+// shape as the account's excluded libraries, e.g. [{"type":"group","group_id":1}].
+// Read whenever local mode publishes its library scope.
+pref("localExcludedLibraries", "[]");

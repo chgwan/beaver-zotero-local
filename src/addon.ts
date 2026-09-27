@@ -77,6 +77,8 @@ class Addon {
     public hasSearchIndexAccess: boolean = false;
     public searchableLibraryIds: number[] = [];
     public libraryScopeInitialized: boolean = false;
+    /** Local mode, fixed at plugin startup; see `Zotero.Beaver.localMode`. */
+    public localMode: boolean = false;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

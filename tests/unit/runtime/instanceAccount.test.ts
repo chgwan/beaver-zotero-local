@@ -20,6 +20,10 @@ vi.mock("@beaver/agent-core/transport/supabaseClient", () => ({
     supabase: {},
     disposeSupabaseClient: mocks.dispose,
     setSupabaseAuthPolicy: vi.fn(),
+    setSupabaseFetchAdapter: vi.fn(),
+}));
+vi.mock("../../../src/runtime/realm", () => ({
+    prepareServiceRealm: vi.fn(),
 }));
 vi.mock("../../../src/services/zoteroSupabaseStorage", () => ({
     registerZoteroSupabaseStorage: vi.fn(),
@@ -33,7 +37,14 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 vi.mock("../../../src/utils/zoteroInstanceIdentity", () => ({
     getZoteroUserIdentifier: () => ({ localUserKey: "install" }),
 }));
-import { InstanceAccount } from "../../../src/services/instanceAccount";
+import {
+    InstanceAccount,
+    createInstanceAccount,
+} from "../../../src/services/instanceAccount";
+import {
+    isBackendAccessAllowed,
+    resetBackendAccessPolicyForTesting,
+} from "@beaver/agent-core/transport/backendAccessPolicy";
 import { getPref, setPref } from "../../../src/utils/prefs";
 
 const session = (id = "a", token = "token") =>
@@ -622,5 +633,152 @@ describe("instance account ownership", () => {
         await refresh;
         expect(account.getSnapshot().data).toBeNull();
         expect(sdk.removeAllChannels).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("instance account in local mode", () => {
+    let account: InstanceAccount;
+    let beaver: any;
+    let prefs: Map<string, unknown>;
+    // Any property read on the SDK fails the test: local mode must never
+    // reach the Supabase client, which would create it.
+    const sdk = new Proxy(
+        {},
+        {
+            get: (_target, key) => {
+                throw new Error(`Supabase SDK touched: ${String(key)}`);
+            },
+        },
+    ) as any;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        resetBackendAccessPolicyForTesting();
+        prefs = new Map<string, unknown>();
+        vi.mocked(Zotero.Prefs.get).mockImplementation((key) => prefs.get(key) as any);
+        vi.mocked(Zotero.Prefs.set).mockImplementation((key, value) => { prefs.set(key, value); });
+        vi.stubGlobal("Services", {
+            io: { offline: false },
+            obs: { addObserver: vi.fn(), removeObserver: vi.fn() },
+        });
+        (Zotero as any).logError = vi.fn();
+        beaver = {
+            localMode: true,
+            voice: { authChanged: vi.fn() },
+            backgroundExtractor: { abortJobsWithoutAccess: vi.fn(), notify: vi.fn() },
+            processingReconciler: { notify: vi.fn() },
+        };
+        (Zotero as any).Beaver = beaver;
+        (Zotero.Libraries.getAll as any).mockReturnValue([
+            { libraryID: 1, libraryType: "user", isGroup: false, name: "My Library", editable: true, filesEditable: true },
+            { libraryID: 2, libraryType: "group", isGroup: true, id: 7, name: "Lab", editable: true, filesEditable: true },
+            { libraryID: 3, libraryType: "feed", isGroup: false, name: "Feed", editable: false, filesEditable: false },
+        ]);
+        account = new InstanceAccount(sdk, () => {}, { localMode: true });
+    });
+    afterEach(async () => {
+        await account.dispose();
+        resetBackendAccessPolicyForTesting();
+        vi.unstubAllGlobals();
+    });
+
+    it("publishes an initialized local scope without creating a Supabase client", () => {
+        const listener = vi.fn();
+        account.subscribe(listener);
+        account.start();
+        const snapshot = account.getSnapshot();
+        expect(snapshot).toMatchObject({
+            initialized: true,
+            session: null,
+            data: null,
+            scopeReady: true,
+            status: { kind: "ok" },
+        });
+        expect(snapshot.libraries.map((lib) => lib.library_id)).toEqual([1, 2]);
+        expect(snapshot.libraries[1]).toMatchObject({ is_group: true, group_id: 7 });
+        expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ scopeReady: true }));
+        expect(beaver.searchableLibraryIds).toEqual([1, 2]);
+        expect(beaver.libraryScopeInitialized).toBe(true);
+        expect(beaver.hasOcrAccess).toBe(false);
+        expect(beaver.hasSearchIndexAccess).toBe(false);
+        expect(Services.obs.addObserver).not.toHaveBeenCalled();
+    });
+
+    it("keeps libraries on the local exclusion list out of the searchable scope", () => {
+        setPref("localExcludedLibraries", JSON.stringify([{ type: "group", group_id: 7 }]));
+        account.start();
+        expect(beaver.searchableLibraryIds).toEqual([1]);
+        expect(account.getSnapshot().libraries.map((lib) => lib.library_id)).toEqual([1, 2]);
+    });
+
+    it("can exclude the user library", () => {
+        setPref("localExcludedLibraries", JSON.stringify([{ type: "user" }]));
+        account.start();
+        expect(beaver.searchableLibraryIds).toEqual([2]);
+    });
+
+    it.each(["{not json", JSON.stringify({ type: "user" })])(
+        "starts with every library searchable and logs a warning when the exclusion list is unreadable: %s",
+        (raw) => {
+            setPref("localExcludedLibraries", raw);
+            expect(() => account.start()).not.toThrow();
+            expect(beaver.searchableLibraryIds).toEqual([1, 2]);
+            expect(beaver.libraryScopeInitialized).toBe(true);
+            expect(Zotero.logError).toHaveBeenCalled();
+        },
+    );
+
+    it("ignores malformed entries but honours the valid ones", () => {
+        setPref(
+            "localExcludedLibraries",
+            JSON.stringify([{ type: "group", group_id: 7 }, { type: "feed" }, null]),
+        );
+        account.start();
+        expect(beaver.searchableLibraryIds).toEqual([1]);
+        expect(Zotero.logError).toHaveBeenCalled();
+    });
+
+    it("never contacts the backend from refresh, thread claiming or auth reads", async () => {
+        account.start();
+        await account.refresh(true);
+        await account.claimPreSyncThreads();
+        await account.reportSessionRejected(account.getGeneration());
+        expect(mocks.profile).not.toHaveBeenCalled();
+        expect(mocks.claim).not.toHaveBeenCalled();
+        await expect(account.auth.getSession()).resolves.toEqual({ data: { session: null }, error: null });
+        await expect(account.auth.refreshSession()).resolves.toEqual({ data: { session: null }, error: null });
+    });
+
+    it("answers auth reads with no session even before start", async () => {
+        await expect(account.auth.getSession()).resolves.toEqual({ data: { session: null }, error: null });
+    });
+
+    it("refuses sign-in without touching the SDK or dropping the local scope", async () => {
+        account.start();
+        const result = await account.auth.signInWithPassword({ email: "a@b.c", password: "x" });
+        expect(result.error).toMatchObject({ name: "BackendAccessBlockedError" });
+        expect(beaver.searchableLibraryIds).toEqual([1, 2]);
+        expect(account.getSnapshot().authenticating).toBe(false);
+    });
+
+    it("disposes without touching the Supabase client", async () => {
+        account.start();
+        await account.dispose();
+        expect(mocks.dispose).not.toHaveBeenCalled();
+        expect(beaver.searchableLibraryIds).toEqual([]);
+        expect(beaver.libraryScopeInitialized).toBe(false);
+    });
+
+    it("createInstanceAccount blocks backend access in the plugin realm when local mode is on", () => {
+        const created = createInstanceAccount();
+        expect(isBackendAccessAllowed()).toBe(false);
+        created.start();
+        expect(created.getSnapshot().scopeReady).toBe(true);
+        void created.dispose();
+    });
+
+    it("createInstanceAccount leaves backend access allowed when local mode is off", () => {
+        beaver.localMode = false;
+        createInstanceAccount();
+        expect(isBackendAccessAllowed()).toBe(true);
     });
 });

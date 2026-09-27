@@ -99,6 +99,7 @@ declare namespace _ZoteroTypes {
       "cloudPreparationConsent": string;
       "localMode": boolean;
       "localMaxRounds": number;
+      "localExcludedLibraries": string;
     };
   }
 }
