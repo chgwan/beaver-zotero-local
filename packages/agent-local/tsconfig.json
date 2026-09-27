@@ -34,6 +34,8 @@
     "./src/tools/argValidation.ts",
     "./src/tools/toolSchemas.ts",
     "./src/tools/toolCatalog.ts",
+    "./src/llm/sseReader.ts",
+    "./src/llm/toolCallAccumulator.ts",
     "./src/index.ts"
   ]
 }
