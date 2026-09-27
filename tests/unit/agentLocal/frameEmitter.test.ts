@@ -46,11 +46,11 @@ describe('FrameEmitter', () => {
         // A provider that also returns a final aggregated message must not
         // produce a second part; that is what renders as "Ready.Ready."
         round.text(1, 'Ready.');
+        await emitter.flush();
 
         const texts = callbacks.onPart.mock.calls
             .map(([event]: any[]) => event.part.content)
             .filter(Boolean);
-        await emitter.flush();
         expect(texts).toEqual(['Ready.']);
     });
 
@@ -356,6 +356,55 @@ describe('FrameEmitter', () => {
             await emitter.finish();
             expect(callbacks.onError).toHaveBeenCalledTimes(1);
             expect(callbacks.onRunCitations).toHaveBeenCalledTimes(1);
+            expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps draining after the first frame on an idle queue throws synchronously', async () => {
+            const callbacks = callbacksSpy();
+            callbacks.onWarning.mockImplementation(() => {
+                throw new Error('sync');
+            });
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => (release = resolve));
+            callbacks.onRunComplete.mockImplementation(() => gate);
+            const emitter = new FrameEmitter({ runId: 'r1', callbacks: callbacks as any });
+
+            emitter.warning({ type: 'local_round_cap', message: 'cap' });
+            const finished = emitter.finish();
+            let settled = false;
+            void emitter.flush().then(() => (settled = true));
+            await tick();
+            expect(settled).toBe(false);
+            expect(callbacks.onDone).not.toHaveBeenCalled();
+
+            release();
+            await finished;
+            expect(settled).toBe(true);
+            expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ type: 'event_handling_error' }));
+            expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+        });
+
+        it('starts a new drain for frames emitted after a synchronous throw emptied the queue', async () => {
+            const callbacks = callbacksSpy();
+            callbacks.onWarning.mockImplementationOnce(() => {
+                throw new Error('sync');
+            });
+            const emitter = new FrameEmitter({ runId: 'r1', callbacks: callbacks as any });
+            const round = emitter.beginRound();
+            round.sealParts();
+            // Nothing queued yet; the first frame throws synchronously.
+            emitter.warning({ type: 'x', message: 'first' });
+            await emitter.flush();
+            round.toolReturn({
+                part_kind: 'tool-return',
+                tool_name: 'zotero_search',
+                tool_call_id: 'c1',
+                content: {},
+                outcome: 'success',
+            } as any);
+            await emitter.finish();
+            expect(callbacks.onToolReturn).toHaveBeenCalledTimes(1);
+            expect(callbacks.onError).toHaveBeenCalledTimes(1);
             expect(callbacks.onDone).toHaveBeenCalledTimes(1);
         });
 
