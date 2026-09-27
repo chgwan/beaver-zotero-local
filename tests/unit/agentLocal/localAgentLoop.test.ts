@@ -806,6 +806,27 @@ describe('runLocalAgentLoop hosted web search', () => {
         ]);
     });
 
+    it('separates a pause continuation from text that did not end in whitespace', async () => {
+        const { client } = webClient([
+            { text: 'Searching.', finishReason: 'pause', providerBlocks: [{ type: 'server_tool_use' }] },
+            { text: 'Answer.' },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        const texts = textFrames();
+        expect(new Set(texts.map((e: any) => `${e.message_index}:${e.part_index}`)).size).toBe(1);
+        expect(texts.map((e: any) => e.part.content)).toEqual(['Searching.', 'Searching.\n\nAnswer.']);
+    });
+
+    it('reports the same search problem once per round', async () => {
+        const warning = 'Web search reached its search limit for this turn.';
+        const { client } = webClient([
+            { text: 'A. ', finishReason: 'pause', providerBlocks: [{ type: 'server_tool_use' }], warnings: [warning] },
+            { text: 'B.', warnings: [warning, warning] },
+        ]);
+        await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });
+        expect(callbacks.onWarning).toHaveBeenCalledTimes(1);
+    });
+
     it('stops continuing after repeated pauses and keeps the answer so far', async () => {
         const { client } = webClient([{ text: 'Still searching.', finishReason: 'pause', providerBlocks: [{ type: 'server_tool_use' }] }]);
         await run(client, callbacks, stubCatalog(), { webSearch: { enabled: true } });

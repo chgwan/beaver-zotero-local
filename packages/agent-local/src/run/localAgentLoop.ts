@@ -150,6 +150,16 @@ export function formatSources(citations: readonly LlmCitation[]): string {
     return `\n\nSources:\n${lines.join('\n')}`;
 }
 
+/**
+ * Join text from before a paused turn with its continuation. The pause fell
+ * at a search, so the continuation starts a new paragraph unless the earlier
+ * text already ends in whitespace.
+ */
+const joinContinuation = (before: string, next: string): string =>
+    before.length > 0 && next.length > 0 && !/\s$/.test(before) && !/^\s/.test(next)
+        ? `${before}\n\n${next}`
+        : before + next;
+
 /** One round's result. */
 interface RoundResult {
     /** The whole round as rendered: text and reasoning across continuations, with sources. */
@@ -199,6 +209,14 @@ async function streamRound(
         frames.text(textIndex, content);
     };
 
+    // A problem repeated across a round's requests (a search limit hit again
+    // after a pause) is reported once.
+    const warned = new Set<string>();
+    const warnOnce = (message: string) => {
+        if (warned.has(message)) return;
+        warned.add(message);
+        hooks.onWarning(message);
+    };
     const paused: LlmMessage[] = [];
     const citations: LlmCitation[] = [];
     let textBefore = '';
@@ -215,12 +233,12 @@ async function streamRound(
             },
             {
                 onThinkingDelta: (fullText) => {
-                    if (fullText) writeThinking(thinkingBefore + fullText);
+                    if (fullText) writeThinking(joinContinuation(thinkingBefore, fullText));
                 },
                 onTextDelta: (fullText) => {
-                    if (fullText) writeText(textBefore + fullText);
+                    if (fullText) writeText(joinContinuation(textBefore, fullText));
                 },
-                onWarning: hooks.onWarning,
+                onWarning: warnOnce,
             },
             signal
         );
@@ -229,7 +247,7 @@ async function streamRound(
 
         if (turn.finishReason !== 'pause') break;
         if (continuation >= MAX_PAUSE_CONTINUATIONS) {
-            hooks.onWarning(
+            warnOnce(
                 'The provider paused its web search too many times; showing the answer so far. ' +
                     'Send a follow-up to continue.'
             );
@@ -240,13 +258,13 @@ async function streamRound(
             content: turn.text,
             ...(turn.providerBlocks ? { providerBlocks: turn.providerBlocks } : {}),
         });
-        textBefore += turn.text;
-        thinkingBefore += turn.thinking;
+        textBefore = joinContinuation(textBefore, turn.text);
+        thinkingBefore = joinContinuation(thinkingBefore, turn.thinking);
     }
 
     const sources = formatSources(citations);
-    const text = textBefore + turn.text + sources;
-    const thinking = thinkingBefore + turn.thinking;
+    const text = joinContinuation(textBefore, turn.text) + sources;
+    const thinking = joinContinuation(thinkingBefore, turn.thinking);
     if (thinking && thinking !== lastThinking) writeThinking(thinking);
     if (text && text !== lastText) writeText(text);
 
