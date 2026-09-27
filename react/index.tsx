@@ -148,8 +148,11 @@ setCredentialAdapter({
     reportSessionRejected: generation => { void instanceAccount.reportSessionRejected(generation); },
 });
 // Local mode reaches no Beaver server. Same probe as the plugin realm's, so
-// both bundles' copies of the transport layer agree.
-setBackendAccessPolicy(() => !Zotero.Beaver?.localMode);
+// both bundles' copies of the transport layer agree: it answers from the
+// value at bundle load, which local mode is fixed to, and so keeps blocking
+// after the plugin object is torn down.
+const backendBlockedForLocalMode = isLocalMode();
+setBackendAccessPolicy(() => !backendBlockedForLocalMode);
 // Local mode never receives the backend model list, so a remembered hosted
 // model cannot run; fall back to a custom one before the first send.
 if (isLocalMode()) store.set(validateSelectedModelAtom);

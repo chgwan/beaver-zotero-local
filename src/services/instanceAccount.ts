@@ -851,9 +851,11 @@ export function createInstanceAccount(): InstanceAccount {
     prepareServiceRealm();
     // Local mode is fixed at plugin startup (`onStartup` sets it before this
     // runs). This probe covers the plugin realm's copy of the transport layer;
-    // it must be in place before anything can reach the Supabase client.
+    // it must be in place before anything can reach the Supabase client. It
+    // answers from the value captured here, so it keeps blocking after the
+    // plugin object is torn down.
     const localMode = Zotero.Beaver?.localMode === true;
-    setBackendAccessPolicy(() => !Zotero.Beaver?.localMode);
+    setBackendAccessPolicy(() => !localMode);
     setTransportConfig({
         apiBaseUrl: process.env.API_BASE_URL ?? "",
         supabaseUrl: process.env.SUPABASE_URL ?? "",
