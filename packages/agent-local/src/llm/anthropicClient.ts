@@ -50,18 +50,32 @@ const isAbortError = (error: unknown): boolean =>
  */
 const stripTrailingV1 = (apiBase: string): string => apiBase.replace(/\/v1\/?$/, '');
 
+/** A wire message's content, normalised to content blocks for merging. */
+const asContentBlocks = (content: unknown): unknown[] => {
+    if (Array.isArray(content)) return content;
+    if (typeof content === 'string') {
+        return content.length > 0 ? [{ type: 'text', text: content }] : [];
+    }
+    return [];
+};
+
 /**
  * Rebuild the transcript in Anthropic's content-block form.
  *
- * A tool result is a `user` message here rather than its own role, and
- * consecutive results must sit in one message, so this walks the list instead
- * of mapping it.
+ * Translation alone does not guarantee an alternating `user`/`assistant`
+ * sequence: two tool results become two `user`-role entries, and replayed
+ * history can legitimately contain two human turns or two assistant turns in
+ * a row (for example, a run cancelled before the model replied). Anthropic
+ * rejects a non-alternating transcript with a 400, so every adjacent run of
+ * same-role entries is merged into one message, concatenating their content
+ * blocks in order (a string message is normalised to a single text block
+ * before merging; an empty one contributes nothing).
  */
 const buildMessages = (
     messages: LlmMessage[]
 ): { system: string | undefined; wire: Record<string, unknown>[] } => {
     const systemParts: string[] = [];
-    const wire: Record<string, unknown>[] = [];
+    const translated: { role: string; content: unknown }[] = [];
 
     for (const message of messages) {
         if (message.role === 'system') {
@@ -70,17 +84,16 @@ const buildMessages = (
         }
 
         if (message.role === 'tool') {
-            const block = {
-                type: 'tool_result',
-                tool_use_id: message.toolCallId,
-                content: message.content,
-            };
-            const previous = wire[wire.length - 1];
-            if (previous?.role === 'user' && Array.isArray(previous.content)) {
-                (previous.content as unknown[]).push(block);
-            } else {
-                wire.push({ role: 'user', content: [block] });
-            }
+            translated.push({
+                role: 'user',
+                content: [
+                    {
+                        type: 'tool_result',
+                        tool_use_id: message.toolCallId,
+                        content: message.content,
+                    },
+                ],
+            });
             continue;
         }
 
@@ -92,11 +105,34 @@ const buildMessages = (
             for (const call of message.toolCalls) {
                 content.push({ type: 'tool_use', id: call.id, name: call.name, input: call.args });
             }
-            wire.push({ role: 'assistant', content });
+            translated.push({ role: 'assistant', content });
             continue;
         }
 
-        wire.push({ role: message.role, content: message.content });
+        translated.push({ role: message.role, content: message.content });
+    }
+
+    const wire: Record<string, unknown>[] = [];
+    for (const message of translated) {
+        const previous = wire[wire.length - 1];
+        if (previous && previous.role === message.role) {
+            previous.content = [
+                ...asContentBlocks(previous.content),
+                ...asContentBlocks(message.content),
+            ];
+        } else {
+            wire.push({ role: message.role, content: message.content });
+        }
+    }
+
+    // A transcript that opens with an assistant message is equally invalid,
+    // and there is no earlier user turn left to attribute it to. Dropping it
+    // is the least surprising option: fabricating a placeholder user turn
+    // would put words in the user's mouth, and the alternative of sending it
+    // anyway just relocates the same 400 to a payload the model can't act on
+    // either way.
+    while (wire.length > 0 && wire[0].role === 'assistant') {
+        wire.shift();
     }
 
     return { system: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, wire };
@@ -137,6 +173,12 @@ export function createAnthropicClient(): LlmClient {
                         'Content-Type': 'application/json',
                         'x-api-key': model.api_key,
                         'anthropic-version': ANTHROPIC_VERSION,
+                        // A privileged Gecko `fetch` can still attach an `Origin`
+                        // header, which Anthropic's browser-key check would
+                        // otherwise reject; this request always carries the
+                        // user's own key from a trusted context, so opting out
+                        // of that check has no downside here.
+                        'anthropic-dangerous-direct-browser-access': 'true',
                     },
                     body: JSON.stringify(payload),
                     signal,
