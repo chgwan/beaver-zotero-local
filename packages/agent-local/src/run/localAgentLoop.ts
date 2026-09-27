@@ -308,8 +308,8 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             type: error instanceof LlmRequestError ? 'local_provider_error' : 'local_agent_error',
             message: describeError(error),
             details: error instanceof LlmRequestError ? error.kind : undefined,
-            // Retrying goes through the backend thread service, which local
-            // mode does not use.
+            // Not retried automatically. The error view still offers a manual
+            // retry, which starts a new local run.
             is_retryable: false,
         });
     }

@@ -4,6 +4,8 @@
  * component-rendering harness.
  */
 
+import { DEFAULT_MAX_ROUNDS } from '@beaver/agent-local/config/localAgentConfig';
+
 /**
  * Local mode is fixed at plugin startup (`Zotero.Beaver.localMode`, read once
  * in `onStartup`), but the preferences pane lets the user flip the `localMode`
@@ -16,11 +18,23 @@ export function needsLocalModeRestart(prefValue: boolean, activeValue: boolean):
 }
 
 /**
+ * Whether to show the round-cap field: only when local mode is on, or has
+ * been switched on and is waiting for a restart. Cloud mode has no use for it.
+ */
+export function showLocalRoundCap(prefValue: boolean, activeValue: boolean): boolean {
+    return prefValue || activeValue;
+}
+
+/** Description for the round-cap field, naming the default a blank field uses. */
+export const LOCAL_ROUND_CAP_DESCRIPTION =
+    `Limit how many tool-calling rounds a single run can take before it stops. Leave blank for the default (${DEFAULT_MAX_ROUNDS}).`;
+
+/**
  * Parse the round-cap text field into the value stored in the
- * `localMaxRounds` preference. Blank input means "no cap", matching that
- * preference's `0` default. Returns null for text that isn't a non-negative
- * integer, so the caller can leave the invalid text on screen without
- * persisting it.
+ * `localMaxRounds` preference. Blank input stores that preference's `0`
+ * default, which runs read as `DEFAULT_MAX_ROUNDS`; there is no uncapped
+ * setting. Returns null for text that isn't a non-negative integer, so the
+ * caller can leave the invalid text on screen without persisting it.
  */
 export function parseLocalMaxRoundsInput(text: string): number | null {
     const trimmed = text.trim();
