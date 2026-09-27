@@ -37,6 +37,8 @@ export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
 export { createOpenAiClient } from './llm/openAiClient';
 export { createAnthropicClient, ANTHROPIC_VERSION, ANTHROPIC_DEFAULT_MAX_TOKENS } from './llm/anthropicClient';
 export { clientForFormat } from './llm/clientForFormat';
+export { supportsHostedWebSearch, isHostedWebSearchAvailable } from './llm/webSearchCapability';
+export type { HostedWebSearchKind } from './llm/webSearchCapability';
 export { LlmRequestError, classifyHttpStatus, providerErrorMessage, joinEndpoint } from './llm/types';
 export type {
     LlmClient,
