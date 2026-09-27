@@ -53,6 +53,8 @@ export type {
 } from './run/frameEmitter';
 export { runLocalAgentLoop } from './run/localAgentLoop';
 export type { LocalAgentLoopOptions } from './run/localAgentLoop';
+export { buildRunHistory, estimateTokens, HISTORY_CONTEXT_SHARE } from './run/runHistory';
+export type { RunHistoryOptions } from './run/runHistory';
 export { buildSystemPrompt } from './run/systemPrompt';
 export type { SystemPromptOptions } from './run/systemPrompt';
 export { buildToolReturnMetadata } from './run/toolReturnMetadata';
