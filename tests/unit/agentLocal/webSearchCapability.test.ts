@@ -45,13 +45,10 @@ describe('supportsHostedWebSearch', () => {
 });
 
 describe('isHostedWebSearchAvailable', () => {
-    it('is true for Anthropic and OpenRouter only', () => {
+    it('is true for Anthropic, OpenRouter and api.openai.com', () => {
         expect(isHostedWebSearchAvailable(model({ format: 'anthropic', api_base: 'https://api.anthropic.com' }))).toBe(true);
         expect(isHostedWebSearchAvailable(model({ format: 'openai', api_base: 'https://openrouter.ai/api/v1' }))).toBe(true);
-    });
-
-    it('is false for api.openai.com until its hosted-search path exists', () => {
-        expect(isHostedWebSearchAvailable(model({ format: 'openai', api_base: 'https://api.openai.com/v1' }))).toBe(false);
+        expect(isHostedWebSearchAvailable(model({ format: 'openai', api_base: 'https://api.openai.com/v1' }))).toBe(true);
     });
 
     it('is false for providers without hosted search', () => {

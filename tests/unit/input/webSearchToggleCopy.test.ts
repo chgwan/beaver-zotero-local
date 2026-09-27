@@ -34,7 +34,7 @@ describe('webSearchToggleCopy', () => {
     it('gives the reason web search is disabled in local mode', () => {
         const unsupported = webSearchToggleCopy({ localMode: true, allowed: false, enabled: false, localReason: 'unsupported' });
         expect(unsupported.title).toBe('Web search is not available for this provider');
-        expect(unsupported.detail).toMatch(/Anthropic and OpenRouter/);
+        expect(unsupported.detail).toMatch(/Anthropic, OpenAI and OpenRouter/);
         expect(unsupported.description).toMatch(/^Web search is unavailable\./);
 
         const off = webSearchToggleCopy({ localMode: true, allowed: false, enabled: false, localReason: 'off' });

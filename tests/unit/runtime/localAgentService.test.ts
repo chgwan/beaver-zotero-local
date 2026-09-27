@@ -227,6 +227,29 @@ describe('LocalAgentService.connect', () => {
             service.close(1000, 'test', { notifyClose: false });
         });
 
+        it('gives an api.openai.com run with web search a client that speaks the Responses API', async () => {
+            const OPENAI = { name: 'GPT', snapshot: 'gpt-5.5', api_key: 'sk-oa', api_base: 'https://api.openai.com/v1', format: 'openai' as const };
+            const urlFor = async (req: any) => {
+                pendingLoop();
+                store.set(localAgentConfigInputAtom, { model: OPENAI, maxRounds: null });
+                store.set(localSearchConfigAtom as any, searchConfig(true));
+                const service = new LocalAgentService();
+                await service.connect(req, callbacks());
+                const { client } = runLoopMock.mock.calls.at(-1)![0];
+                service.close(1000, 'test', { notifyClose: false });
+                const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
+                vi.stubGlobal('fetch', fetchMock);
+                await client
+                    .streamTurn({ model: OPENAI, messages: [{ role: 'user', content: 'hi' }], tools: [] }, { onTextDelta: vi.fn(), onThinkingDelta: vi.fn() }, new AbortController().signal)
+                    .catch(() => undefined);
+                vi.unstubAllGlobals();
+                return fetchMock.mock.calls[0][0];
+            };
+
+            expect(await urlFor(webRequest())).toBe('https://api.openai.com/v1/responses');
+            expect(await urlFor(request())).toBe('https://api.openai.com/v1/chat/completions');
+        });
+
         it('does not ask for web search when the message did not request it', async () => {
             pendingLoop();
             store.set(localAgentConfigInputAtom, { model: ANTHROPIC, maxRounds: null });

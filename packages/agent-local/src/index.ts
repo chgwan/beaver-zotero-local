@@ -46,7 +46,7 @@ export {
     buildResponsesInput,
     OPENAI_WEB_SEARCH_TOOL,
 } from './llm/openAiResponsesClient';
-export { clientForFormat } from './llm/clientForFormat';
+export { clientForFormat, clientForRun } from './llm/clientForFormat';
 export { supportsHostedWebSearch, isHostedWebSearchAvailable } from './llm/webSearchCapability';
 export type { HostedWebSearchKind } from './llm/webSearchCapability';
 export {
