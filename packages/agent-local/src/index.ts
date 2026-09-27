@@ -92,3 +92,5 @@ export {
     SEMANTIC_SCHOLAR_MIN_INTERVAL_MS,
     semanticScholarGate,
 } from './search/semanticScholar';
+export { runScholarlySearch, DEFAULT_RESULT_LIMIT, MAX_RESULT_LIMIT } from './search/scholarlySearch';
+export type { ScholarlySearchOptions, ScholarlySearchOutcome } from './search/scholarlySearch';
