@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useAtomValue } from "jotai";
 import Button from "@beaver/agent-ui/primitives/Button";
 import CopyButton from "../ui/buttons/CopyButton";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
@@ -15,13 +16,16 @@ import {
     TissuePaperIcon,
     ScissorIcon,
 } from "../icons/icons";
-import { CustomChatModel, validateCustomProviderApiBase } from "../../types/settings";
+import { CustomChatModel, validateProviderApiBase } from "../../types/settings";
 import { DocLink, ExternalLink, INTELLIGENCE_INDEX_URL } from "./components/SettingsElements";
 import {
     chatService,
     RockPaperScissorsMove,
     RockPaperScissorsTestResult,
 } from "@beaver/agent-core/transport/clients/chatService";
+import { localModeEnabledAtom } from "../../atoms/localMode";
+import { clientForFormat } from "@beaver/agent-local/llm/clientForFormat";
+import { testLocalProvider } from "./localProviderTest";
 
 interface CustomProviderCardProps {
     model: CustomChatModel;
@@ -68,9 +72,11 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     onToggleExpand,
     autoFocusName = false,
 }) => {
+    const localMode = useAtomValue(localModeEnabledAtom);
     const [testStatus, setTestStatus] = useState<TestStatus>('idle');
     const [testResult, setTestResult] = useState<RockPaperScissorsTestResult | null>(null);
     const [testError, setTestError] = useState<string | null>(null);
+    const [localTestMessage, setLocalTestMessage] = useState<string | null>(null);
     const [contextWindowText, setContextWindowText] = useState<string>(
         model.context_window != null ? String(model.context_window) : ''
     );
@@ -103,14 +109,19 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         }
     }, [update]);
 
-    // --- Validation (mirrors the backend security checks) ---
-    const apiBaseValidation = useMemo(() => validateCustomProviderApiBase(model.api_base), [model.api_base]);
+    // --- Validation (mirrors the backend security checks; local mode also
+    // allows http/localhost/private hosts since the request never leaves the
+    // user's machine) ---
+    const apiBaseValidation = useMemo(
+        () => validateProviderApiBase(model.api_base, { allowLocalEndpoints: localMode }),
+        [model.api_base, localMode],
+    );
     const hasName = !!model.name?.trim();
     const hasSnapshot = !!model.snapshot?.trim();
     const hasApiKey = !!model.api_key?.trim();
     const isComplete = hasName && hasSnapshot && hasApiKey && apiBaseValidation.valid;
 
-    // --- Test endpoint ---
+    // --- Test endpoint (hosted: rock-paper-scissors through the backend) ---
     const runTest = useCallback(async (userMove: RockPaperScissorsMove) => {
         setTestStatus('loading');
         setTestResult(null);
@@ -138,6 +149,33 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         } catch (error) {
             setTestStatus('error');
             setTestError(error instanceof Error ? error.message : 'The provider test failed.');
+        }
+    }, [model]);
+
+    // --- Test endpoint (local mode: talk to the provider directly, no backend hop) ---
+    const runLocalTest = useCallback(async () => {
+        setTestStatus('loading');
+        setLocalTestMessage(null);
+        setTestError(null);
+        const client = clientForFormat(model.format === 'anthropic' ? 'anthropic' : 'openai');
+        const result = await testLocalProvider(
+            {
+                api_base: model.api_base?.trim() || undefined,
+                format: model.format === 'anthropic' ? 'anthropic' : 'openai',
+                api_key: model.api_key?.trim() ?? '',
+                name: model.name?.trim() ?? '',
+                snapshot: model.snapshot?.trim() ?? '',
+                context_window: model.context_window,
+                supports_vision: model.supports_vision,
+            },
+            client,
+        );
+        if (result.ok) {
+            setLocalTestMessage(result.message);
+            setTestStatus('success');
+        } else {
+            setTestStatus('error');
+            setTestError(result.message);
         }
     }, [model]);
 
@@ -259,8 +297,13 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         <span className="display-flex flex-row items-start text-sm font-color-error">
                             <Icon icon={AlertIcon} className="flex-shrink-0 mt-020 mr-1" />
                             <span>
-                                {apiBaseValidation.error}{' '}
-                                <DocLink path="custom-models">Network requirements</DocLink>
+                                {apiBaseValidation.error}
+                                {!localMode && (
+                                    <>
+                                        {' '}
+                                        <DocLink path="custom-models">Network requirements</DocLink>
+                                    </>
+                                )}
                             </span>
                         </span>
                     )}
@@ -337,18 +380,33 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
 
                 {/* Footer actions */}
                 <div className="display-flex flex-row items-center justify-between mt-1">
-                    <MenuButton
-                        menuItems={testMenuItems}
-                        header={testMenuHeader}
-                        customContent={testButtonCustomContent}
-                        variant="outline"
-                        width="220px"
-                        className="text-base"
-                        style={{ padding: '4px 6px' }}
-                        ariaLabel="Test endpoint"
-                        disabled={!isComplete && testStatus !== 'loading'}
-                        tooltipContent={!isComplete ? 'Fill in all required fields to test the endpoint.' : undefined}
-                    />
+                    {localMode ? (
+                        <Button
+                            variant="outline"
+                            icon={testStatus === 'loading' ? undefined : testStatus === 'success' ? TickIcon : undefined}
+                            onClick={runLocalTest}
+                            style={{ padding: '4px 6px' }}
+                            disabled={(!isComplete && testStatus !== 'loading') || testStatus === 'loading'}
+                            title={!isComplete ? 'Fill in all required fields to test the endpoint.' : undefined}
+                            loading={testStatus === 'loading'}
+                            loadingText="Testing..."
+                        >
+                            Test Endpoint
+                        </Button>
+                    ) : (
+                        <MenuButton
+                            menuItems={testMenuItems}
+                            header={testMenuHeader}
+                            customContent={testButtonCustomContent}
+                            variant="outline"
+                            width="220px"
+                            className="text-base"
+                            style={{ padding: '4px 6px' }}
+                            ariaLabel="Test endpoint"
+                            disabled={!isComplete && testStatus !== 'loading'}
+                            tooltipContent={!isComplete ? 'Fill in all required fields to test the endpoint.' : undefined}
+                        />
+                    )}
                     <div className="display-flex flex-row items-center gap-3">
                         <Button
                             variant="outline"
@@ -377,7 +435,23 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </div>
 
                 {/* Test result (shown below the Test button) */}
-                {testStatus === 'success' && testResult && (
+                {localMode && testStatus === 'success' && (
+                    <div
+                        className="display-flex flex-col gap-1 rounded-md px-2 py-15 text-base"
+                        style={{ border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
+                    >
+                        <div className="display-flex flex-row items-center gap-2 font-color-primary">
+                            <Icon icon={TickIcon} className="font-color-green" />
+                            <span className="font-medium">Endpoint works</span>
+                        </div>
+                        {localTestMessage && (
+                            <div className="font-color-secondary" style={{ fontStyle: 'italic' }}>
+                                “{localTestMessage}”
+                            </div>
+                        )}
+                    </div>
+                )}
+                {!localMode && testStatus === 'success' && testResult && (
                     <div
                         className="display-flex flex-col gap-1 rounded-md px-2 py-15 text-base"
                         style={{ border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
