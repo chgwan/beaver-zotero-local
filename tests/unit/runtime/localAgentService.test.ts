@@ -198,6 +198,71 @@ describe('LocalAgentService.connect', () => {
         service.close(1000, 'test', { notifyClose: false });
     });
 
+    describe('hosted web search', () => {
+        const ANTHROPIC = { name: 'Claude', snapshot: 'claude-x', api_key: 'sk-ant', api_base: 'https://api.anthropic.com', format: 'anthropic' as const };
+        const webRequest = () =>
+            request({
+                user_prompt: {
+                    content: 'What is new?',
+                    tool_requests: [{ function: 'search_external_references', parameters: {} }],
+                },
+            } as any);
+        const searchConfig = (webSearch: boolean) => ({
+            scholarlySearch: false,
+            openAlexApiKey: '',
+            semanticScholarApiKey: '',
+            webSearch,
+            webSearchMaxUses: 4,
+        });
+
+        it('asks the loop for hosted web search when the message requests it and it is allowed', async () => {
+            pendingLoop();
+            store.set(localAgentConfigInputAtom, { model: ANTHROPIC, maxRounds: null });
+            store.set(localSearchConfigAtom as any, searchConfig(true));
+            const service = new LocalAgentService();
+
+            await service.connect(webRequest(), callbacks());
+
+            expect(runLoopMock.mock.calls[0][0].webSearch).toEqual({ enabled: true, maxUses: 4 });
+            service.close(1000, 'test', { notifyClose: false });
+        });
+
+        it('does not ask for web search when the message did not request it', async () => {
+            pendingLoop();
+            store.set(localAgentConfigInputAtom, { model: ANTHROPIC, maxRounds: null });
+            store.set(localSearchConfigAtom as any, searchConfig(true));
+            const service = new LocalAgentService();
+
+            await service.connect(request(), callbacks());
+
+            expect(runLoopMock.mock.calls[0][0].webSearch).toBeUndefined();
+            service.close(1000, 'test', { notifyClose: false });
+        });
+
+        it('does not ask for web search while the preference is off', async () => {
+            pendingLoop();
+            store.set(localAgentConfigInputAtom, { model: ANTHROPIC, maxRounds: null });
+            store.set(localSearchConfigAtom as any, searchConfig(false));
+            const service = new LocalAgentService();
+
+            await service.connect(webRequest(), callbacks());
+
+            expect(runLoopMock.mock.calls[0][0].webSearch).toBeUndefined();
+            service.close(1000, 'test', { notifyClose: false });
+        });
+
+        it('does not ask for web search on a provider without hosted search', async () => {
+            pendingLoop();
+            store.set(localSearchConfigAtom as any, searchConfig(true));
+            const service = new LocalAgentService();
+
+            await service.connect(webRequest(), callbacks());
+
+            expect(runLoopMock.mock.calls[0][0].webSearch).toBeUndefined();
+            service.close(1000, 'test', { notifyClose: false });
+        });
+    });
+
     it('resolves once ready is emitted, before the loop finishes', async () => {
         const { release } = pendingLoop();
         const service = new LocalAgentService();

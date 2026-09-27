@@ -34,6 +34,8 @@ import { agentService } from '@beaver/agent-core/transport/agentService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLocalAgentConfig } from '@beaver/agent-local/config/localAgentConfig';
 import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
+import type { LlmWebSearchOptions } from '@beaver/agent-local/llm/types';
+import { isHostedWebSearchAvailable } from '@beaver/agent-local/llm/webSearchCapability';
 import { runLocalAgentLoop } from '@beaver/agent-local/run/localAgentLoop';
 import { buildRunHistory } from '@beaver/agent-local/run/runHistory';
 import { scopePromptToLibraries } from '@beaver/agent-local/run/userPrompt';
@@ -78,6 +80,22 @@ function buildNativeTools(search: LocalSearchConfig): NativeTool[] {
     ];
 }
 
+/**
+ * Hosted web search for a run: only when the message asked for it (the
+ * composer's globe), the preference allows it, and the provider has it.
+ */
+function webSearchFor(
+    request: AgentRunRequest,
+    search: LocalSearchConfig,
+    model: Parameters<typeof isHostedWebSearchAvailable>[0]
+): LlmWebSearchOptions | undefined {
+    const requested = request.user_prompt.tool_requests?.some(
+        (toolRequest) => toolRequest.function === 'search_external_references'
+    ) === true;
+    if (!requested || !search.webSearch || !isHostedWebSearchAvailable(model)) return undefined;
+    return { enabled: true, maxUses: search.webSearchMaxUses };
+}
+
 export class LocalAgentService {
     private active: ActiveLocalRun | null = null;
 
@@ -107,6 +125,8 @@ export class LocalAgentService {
         }
         const config = resolved.config;
 
+        // The search preferences are read once, when the run starts.
+        const search = store.get(localSearchConfigAtom);
         let catalog: ReturnType<typeof buildToolCatalog>;
         let history: ReturnType<typeof buildRunHistory>;
         let userPrompt: BeaverAgentPrompt;
@@ -127,7 +147,7 @@ export class LocalAgentService {
                 },
                 searchableLibraryIds,
                 contextWindow: config.model.context_window,
-                nativeTools: buildNativeTools(store.get(localSearchConfigAtom)),
+                nativeTools: buildNativeTools(search),
             });
             history = buildRunHistory(store.get(threadRunsAtom), request.thread_id ?? null, {
                 contextWindow: config.model.context_window,
@@ -145,6 +165,8 @@ export class LocalAgentService {
         const ready = new Promise<void>((resolve) => { markReady = resolve; });
         const forwarded = this.forwardWhileActive(run, callbacks, markReady);
 
+        const webSearch = webSearchFor(request, search, config.model);
+
         callbacks.onOpen?.();
         const loop = runLocalAgentLoop({
             runId: request.run_id,
@@ -157,6 +179,7 @@ export class LocalAgentService {
             catalog,
             callbacks: forwarded,
             signal: run.controller.signal,
+            ...(webSearch ? { webSearch } : {}),
         });
         void loop
             .catch((error: unknown) => {
