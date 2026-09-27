@@ -41,19 +41,24 @@ export const ANTHROPIC_VERSION = '2023-06-01';
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192;
 
 /**
- * Hosted web search server tool versions, as documented at
+ * The hosted web search server tool version, as documented at
  * https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
  *
- * `web_search_20260209` adds dynamic filtering (the provider filters results
- * with code execution before they reach the context) on recent models.
- * `web_search_20250305` is the basic tool every web-search-capable model and
- * platform accepts. The newer one is tried first; a 400 that names its type,
- * or asks for `allowed_callers` (a model without programmatic tool calling),
- * is retried once with the basic one. Searches are billed per search by the
- * provider, on top of tokens.
+ * `web_search_20250305` is the basic tool. Every web-search-capable model and
+ * platform accepts it, it is eligible for zero data retention, and a turn
+ * that uses it holds only `server_tool_use`, `web_search_tool_result`, and
+ * cited text, so a paused or later turn is continued by replaying those
+ * blocks alone. Searches are billed per search by the provider, on top of
+ * tokens.
+ *
+ * Later versions (`web_search_20260209` and on) add dynamic filtering: the
+ * search runs inside the provider's code execution, whose container state a
+ * continued turn may need back. Enabling them would mean capturing the
+ * response's `container.id` (from `message_start` / `message_delta`) and
+ * sending it as `container` on the next request of the run, and accepting
+ * code-execution blocks in replayed turns.
  */
-export const ANTHROPIC_WEB_SEARCH_TOOL = 'web_search_20260209';
-export const ANTHROPIC_WEB_SEARCH_TOOL_BASIC = 'web_search_20250305';
+export const ANTHROPIC_WEB_SEARCH_TOOL = 'web_search_20250305';
 
 const mapStopReason = (reason: string | null | undefined): LlmFinishReason => {
     if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
@@ -125,6 +130,7 @@ class ContentBlockRecorder {
             const block = this.blocks.get(index)!;
             const input = this.inputText.get(index);
             if (input !== undefined) block.input = parseJsonObject(input);
+            else if ((block.type === 'server_tool_use' || block.type === 'tool_use') && !block.input) block.input = {};
             if (block.type === 'text') {
                 if (!Array.isArray(block.citations) || block.citations.length === 0) delete block.citations;
                 // The API rejects an empty text block.
@@ -248,10 +254,6 @@ const buildMessages = (
 };
 
 export function createAnthropicClient(): LlmClient {
-    // Once the basic web search version was needed, later turns of the same
-    // client use it directly: no repeated rejected request, and a paused turn
-    // is continued with the same tool it started with.
-    let webSearchToolType = ANTHROPIC_WEB_SEARCH_TOOL;
     return {
         async streamTurn(
             request: LlmTurnRequest,
@@ -267,7 +269,7 @@ export function createAnthropicClient(): LlmClient {
                 description: tool.description,
                 input_schema: tool.parameters,
             }));
-            const buildPayload = (webSearchTool: string | null): Record<string, unknown> => {
+            const buildPayload = (withWebSearch: boolean): Record<string, unknown> => {
                 const payload: Record<string, unknown> = {
                     model: model.snapshot,
                     stream: true,
@@ -276,10 +278,10 @@ export function createAnthropicClient(): LlmClient {
                 };
                 if (system) payload.system = system;
                 const allTools: Record<string, unknown>[] = [...localTools];
-                if (webSearchTool) {
+                if (withWebSearch) {
                     const maxUses = webSearch?.maxUses;
                     allTools.push({
-                        type: webSearchTool,
+                        type: ANTHROPIC_WEB_SEARCH_TOOL,
                         name: 'web_search',
                         ...(maxUses && Number.isInteger(maxUses) && maxUses > 0 ? { max_uses: maxUses } : {}),
                     });
@@ -330,19 +332,8 @@ export function createAnthropicClient(): LlmClient {
                 return providerErrorMessage(body, `${failed.status} ${failed.statusText}`);
             };
 
-            let response = await post(buildPayload(webSearch ? webSearchToolType : null));
-            let errorMessage = response.ok ? null : await readError(response);
-            if (
-                webSearch &&
-                webSearchToolType !== ANTHROPIC_WEB_SEARCH_TOOL_BASIC &&
-                response.status === 400 &&
-                errorMessage !== null &&
-                (errorMessage.includes(webSearchToolType) || errorMessage.includes('allowed_callers'))
-            ) {
-                response = await post(buildPayload(ANTHROPIC_WEB_SEARCH_TOOL_BASIC));
-                errorMessage = response.ok ? null : await readError(response);
-                if (response.ok) webSearchToolType = ANTHROPIC_WEB_SEARCH_TOOL_BASIC;
-            }
+            const response = await post(buildPayload(webSearch !== null));
+            const errorMessage = response.ok ? null : await readError(response);
 
             if (!response.ok) {
                 const message = errorMessage ?? `${response.status} ${response.statusText}`;
@@ -366,6 +357,11 @@ export function createAnthropicClient(): LlmClient {
             // than turning into a phantom call with an empty name.
             const blockTypes = new Map<number, string>();
             const recorder = new ContentBlockRecorder();
+            // Text resumed after a search (or any other non-text block) is a
+            // new paragraph; text blocks that follow each other directly are
+            // one passage that citations split up, and join as they are.
+            let previousBlockType: string | null = null;
+            let separateNextText = false;
             const citations: LlmCitation[] = [];
             let text = '';
             let thinking = '';
@@ -405,6 +401,10 @@ export function createAnthropicClient(): LlmClient {
                     const index = frame.index ?? 0;
                     blockTypes.set(index, block.type);
                     recorder.start(index, block);
+                    if (block.type === 'text' && previousBlockType !== null && previousBlockType !== 'text') {
+                        separateNextText = true;
+                    }
+                    previousBlockType = block.type;
                     if (block.type === 'tool_use') {
                         accumulator.open(index, { id: block.id, name: block.name });
                     }
@@ -433,6 +433,10 @@ export function createAnthropicClient(): LlmClient {
                     // `input_json_delta`, no other block type emits them — so
                     // no separate block-type check is needed here.
                     if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+                        if (separateNextText && delta.text.length > 0) {
+                            if (text.length > 0 && !/\s$/.test(text)) text += '\n\n';
+                            separateNextText = false;
+                        }
                         text += delta.text;
                         handlers.onTextDelta(text);
                     } else if (

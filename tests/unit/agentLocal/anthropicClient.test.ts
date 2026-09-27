@@ -621,14 +621,14 @@ describe('createAnthropicClient hosted web search', () => {
         );
         const tools = bodyOf(fetchMock).tools;
         expect(tools).toHaveLength(2);
-        expect(tools[1]).toEqual({ type: 'web_search_20260209', name: 'web_search', max_uses: 3 });
+        expect(tools[1]).toEqual({ type: 'web_search_20250305', name: 'web_search', max_uses: 3 });
     });
 
     it('sends the server tool even when the turn has no local tools', async () => {
         const fetchMock = vi.fn().mockResolvedValue(sseResponse(STOP));
         vi.stubGlobal('fetch', fetchMock);
         await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
-        expect(bodyOf(fetchMock).tools).toEqual([{ type: 'web_search_20260209', name: 'web_search' }]);
+        expect(bodyOf(fetchMock).tools).toEqual([{ type: 'web_search_20250305', name: 'web_search' }]);
     });
 
     it('adds no server tool when web search is disabled or unset', async () => {
@@ -638,41 +638,6 @@ describe('createAnthropicClient hosted web search', () => {
         await createAnthropicClient().streamTurn(turn({ tools: [ZOTERO_SEARCH_TOOL] }), handlers(), signal());
         expect(bodyOf(fetchMock, 0).tools).toBeUndefined();
         expect(bodyOf(fetchMock, 1).tools.map((t: any) => t.type ?? t.name)).toEqual([ZOTERO_SEARCH_TOOL.name]);
-    });
-
-    it('retries once with the basic tool version when a 400 names the newer tool type', async () => {
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce(errorResponse(400, 'tools.1: Input tag \'web_search_20260209\' found using \'type\' does not match any of the expected tags'))
-            .mockResolvedValueOnce(sseResponse(frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'ok' } }), STOP));
-        vi.stubGlobal('fetch', fetchMock);
-        const result = await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true, maxUses: 2 } }), handlers(), signal());
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(bodyOf(fetchMock, 1).tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]);
-        expect(result.text).toBe('ok');
-    });
-
-    it('keeps using the basic version for later turns of the same client', async () => {
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce(errorResponse(400, "Unknown tool type 'web_search_20260209'"))
-            .mockResolvedValue(sseResponse(STOP));
-        vi.stubGlobal('fetch', fetchMock);
-        const client = createAnthropicClient();
-        await client.streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
-        await client.streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
-        expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(bodyOf(fetchMock, 2).tools[0].type).toBe('web_search_20250305');
-    });
-
-    it('retries with the basic version when the model needs direct callers', async () => {
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce(errorResponse(400, 'This model does not support programmatic tool calling. Set allowed_callers to ["direct"].'))
-            .mockResolvedValueOnce(sseResponse(STOP));
-        vi.stubGlobal('fetch', fetchMock);
-        await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
-        expect(bodyOf(fetchMock, 1).tools[0].type).toBe('web_search_20250305');
     });
 
     it('reports a web-search-specific error when the provider rejects the web tool', async () => {
@@ -685,22 +650,80 @@ describe('createAnthropicClient hosted web search', () => {
         expect(failure.kind).toBe('bad_request');
         expect(failure.message).toMatch(/web search is not available for this provider or model/i);
         expect(failure.message).toContain('not enabled for this organization');
-        // Not a version problem, so the basic version is not tried.
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('reports the web-search error when the basic version is rejected too', async () => {
-        const fetchMock = vi
-            .fn()
-            .mockResolvedValueOnce(errorResponse(400, "Unknown tool type 'web_search_20260209'"))
-            .mockResolvedValueOnce(errorResponse(400, "Unknown tool type 'web_search_20250305'"));
+    it('sends one request and reports the web-search error when the tool type is rejected', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(errorResponse(400, "Unknown tool type 'web_search_20250305'"));
         vi.stubGlobal('fetch', fetchMock);
         const failure = await createAnthropicClient()
             .streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal())
             .catch((e) => e);
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(failure.message).toMatch(/web search is not available/i);
         expect(failure.message).toContain('web_search_20250305');
+    });
+
+    it('separates text that a search interrupted', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    frame('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }),
+                    frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: "I'll search for it." } }),
+                    frame('content_block_start', { index: 1, content_block: { type: 'server_tool_use', id: 's1', name: 'web_search' } }),
+                    frame('content_block_start', { index: 2, content_block: { type: 'web_search_tool_result', tool_use_id: 's1', content: [] } }),
+                    frame('content_block_start', { index: 3, content_block: { type: 'text', text: '' } }),
+                    frame('content_block_delta', { index: 3, delta: { type: 'text_delta', text: 'Based on the results, ' } }),
+                    frame('content_block_start', { index: 4, content_block: { type: 'text', text: '' } }),
+                    frame('content_block_delta', { index: 4, delta: { type: 'citations_delta', citation: { url: 'u', title: 't' } } }),
+                    frame('content_block_delta', { index: 4, delta: { type: 'text_delta', text: 'he was born in 1916.' } }),
+                    STOP
+                )
+            )
+        );
+        const h = handlers();
+        const result = await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true } }), h, signal());
+        // A search between text blocks separates them; a citation split does not.
+        expect(result.text).toBe("I'll search for it.\n\nBased on the results, he was born in 1916.");
+        expect(h.onTextDelta.mock.calls.map(([t]) => t)).toEqual([
+            "I'll search for it.",
+            "I'll search for it.\n\nBased on the results, ",
+            "I'll search for it.\n\nBased on the results, he was born in 1916.",
+        ]);
+    });
+
+    it('adds no separator when the text before a search already ends in whitespace', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    frame('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }),
+                    frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'Looking. ' } }),
+                    frame('content_block_start', { index: 1, content_block: { type: 'server_tool_use', id: 's1', name: 'web_search' } }),
+                    frame('content_block_start', { index: 2, content_block: { type: 'text', text: '' } }),
+                    frame('content_block_delta', { index: 2, delta: { type: 'text_delta', text: 'Found.' } }),
+                    STOP
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
+        expect(result.text).toBe('Looking. Found.');
+    });
+
+    it('replays a server tool call with no streamed input as an empty input object', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    frame('content_block_start', { index: 0, content_block: { type: 'server_tool_use', id: 's1', name: 'web_search' } }),
+                    frame('message_delta', { delta: { stop_reason: 'pause_turn' } }),
+                    STOP
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
+        expect(result.providerBlocks).toEqual([{ type: 'server_tool_use', id: 's1', name: 'web_search', input: {} }]);
     });
 
     it('does not retry or rewrite a 400 unrelated to the web tool', async () => {
