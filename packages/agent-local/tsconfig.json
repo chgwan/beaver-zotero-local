@@ -36,6 +36,7 @@
     "./src/tools/toolCatalog.ts",
     "./src/llm/sseReader.ts",
     "./src/llm/toolCallAccumulator.ts",
+    "./src/run/frameEmitter.ts",
     "./src/index.ts"
   ]
 }

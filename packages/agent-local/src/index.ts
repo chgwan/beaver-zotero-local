@@ -30,3 +30,10 @@ export { readSseEvents } from './llm/sseReader';
 export type { SseEvent } from './llm/sseReader';
 export { ToolCallAccumulator } from './llm/toolCallAccumulator';
 export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
+export { FrameEmitter } from './run/frameEmitter';
+export type {
+    FrameEmitterOptions,
+    FrameEmitterFailure,
+    RoundFrames,
+    SealedToolReturn,
+} from './run/frameEmitter';

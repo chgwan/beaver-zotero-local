@@ -5,6 +5,12 @@
  * new host-environment dependency fails loudly here.
  */
 
+/**
+ * Connectivity probe. Declared possibly-undefined so call sites must guard
+ * with `typeof navigator !== 'undefined'` — not every host provides it.
+ */
+declare const navigator: { onLine: boolean; platform?: string; userAgent?: string } | undefined;
+
 /** Development logging. Possibly-undefined: some host contexts have no console. */
 declare const console: { log(...args: any[]): void; warn(...args: any[]): void; error(...args: any[]): void } | undefined;
 
