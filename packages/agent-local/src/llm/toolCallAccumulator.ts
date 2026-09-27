@@ -101,3 +101,25 @@ export class ToolCallAccumulator {
         return calls;
     }
 }
+
+/**
+ * The arguments text to send back to the provider when replaying a call.
+ *
+ * What the provider streamed is sent back verbatim when it was a JSON object,
+ * so a request the model can already see is never reworded. Anything else —
+ * malformed JSON, a non-object, nothing at all — is replaced by the parsed
+ * arguments (`{}` for a failed parse): strict servers reject a transcript
+ * whose tool-call arguments are not valid JSON, and the call's failed tool
+ * return already tells the model what went wrong.
+ */
+export function wireArguments(call: AccumulatedToolCall): string {
+    if (!call.parseError && call.rawArgs.trim().length > 0) {
+        try {
+            const parsed: unknown = JSON.parse(call.rawArgs);
+            if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return call.rawArgs;
+        } catch {
+            // Fall through to the parsed arguments.
+        }
+    }
+    return JSON.stringify(call.args ?? {});
+}

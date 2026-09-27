@@ -28,7 +28,7 @@ export type {
 } from './tools/toolCatalog';
 export { readSseEvents } from './llm/sseReader';
 export type { SseEvent } from './llm/sseReader';
-export { ToolCallAccumulator } from './llm/toolCallAccumulator';
+export { ToolCallAccumulator, wireArguments } from './llm/toolCallAccumulator';
 export type { AccumulatedToolCall } from './llm/toolCallAccumulator';
 export { createOpenAiClient } from './llm/openAiClient';
 export { createAnthropicClient, ANTHROPIC_VERSION, ANTHROPIC_DEFAULT_MAX_TOKENS } from './llm/anthropicClient';
