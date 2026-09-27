@@ -305,7 +305,7 @@ const ApiKeysSection: React.FC = () => {
                         <SettingsRow
                             hasBorder
                             title="Web search"
-                            description={localWebSearchDescription(localWebSearchStatus.kind)}
+                            description={localWebSearchDescription(localWebSearchStatus.kind, localWebSearchStatus.hostUnconfirmed)}
                             control={
                                 <input
                                     type="checkbox"

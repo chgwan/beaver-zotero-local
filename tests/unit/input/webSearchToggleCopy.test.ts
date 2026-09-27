@@ -31,6 +31,33 @@ describe('webSearchToggleCopy', () => {
         expect(webSearchToggleCopy({ localMode: true, allowed: true, enabled: true, localReason: null }).detail).toBe(HOSTED);
     });
 
+    it('warns the endpoint may not support it when the host is unconfirmed', () => {
+        const enabled = webSearchToggleCopy({
+            localMode: true,
+            allowed: true,
+            enabled: true,
+            localReason: null,
+            hostUnconfirmed: true,
+        });
+        expect(enabled.detail).toContain('may not be supported by this endpoint');
+
+        const disabled = webSearchToggleCopy({
+            localMode: true,
+            allowed: true,
+            enabled: false,
+            localReason: null,
+            hostUnconfirmed: true,
+        });
+        expect(disabled.detail).toContain('may not be supported by this endpoint');
+    });
+
+    it('omits the endpoint warning when the host is confirmed or not provided', () => {
+        expect(
+            webSearchToggleCopy({ localMode: true, allowed: true, enabled: false, localReason: null, hostUnconfirmed: false }).detail
+        ).toBe(HOSTED);
+        expect(webSearchToggleCopy({ localMode: true, allowed: true, enabled: false, localReason: null }).detail).toBe(HOSTED);
+    });
+
     it('gives the reason web search is disabled in local mode', () => {
         const unsupported = webSearchToggleCopy({ localMode: true, allowed: false, enabled: false, localReason: 'unsupported' });
         expect(unsupported.title).toBe('Web search is not available for this provider');

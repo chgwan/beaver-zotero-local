@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     supportsHostedWebSearch,
     isHostedWebSearchAvailable,
+    isAnthropicOfficialHost,
 } from '@beaver/agent-local/llm/webSearchCapability';
 
 const model = (overrides: Record<string, unknown> = {}) => ({
@@ -41,6 +42,27 @@ describe('supportsHostedWebSearch', () => {
 
     it('reports null with no model', () => {
         expect(supportsHostedWebSearch(null)).toBeNull();
+    });
+});
+
+describe('isAnthropicOfficialHost', () => {
+    it('is true for an Anthropic-format model on api.anthropic.com', () => {
+        expect(isAnthropicOfficialHost(model({ format: 'anthropic', api_base: 'https://api.anthropic.com' }))).toBe(true);
+    });
+
+    it('is false for an Anthropic-format model on any other host', () => {
+        expect(isAnthropicOfficialHost(model({ format: 'anthropic', api_base: 'https://my-proxy.example.com' }))).toBe(false);
+        expect(isAnthropicOfficialHost(model({ format: 'anthropic', api_base: '' }))).toBe(false);
+        expect(isAnthropicOfficialHost(model({ format: 'anthropic' }))).toBe(false);
+    });
+
+    it('is false for a non-Anthropic-format model, even on api.anthropic.com', () => {
+        expect(isAnthropicOfficialHost(model({ format: 'openai', api_base: 'https://api.anthropic.com' }))).toBe(false);
+    });
+
+    it('is false with no model', () => {
+        expect(isAnthropicOfficialHost(null)).toBe(false);
+        expect(isAnthropicOfficialHost(undefined)).toBe(false);
     });
 });
 

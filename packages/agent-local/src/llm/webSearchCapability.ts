@@ -45,6 +45,20 @@ export function supportsHostedWebSearch(model: CustomChatModel | null | undefine
     return null;
 }
 
+/**
+ * Whether an Anthropic-format model's endpoint is Anthropic's own API.
+ *
+ * `supportsHostedWebSearch` reports `'anthropic'` for any Anthropic-format
+ * endpoint, including a self-hosted or third-party proxy that only mimics the
+ * wire format — such a proxy may not implement the Messages API's hosted
+ * `web_search` server tool at all. This is the separate, narrower signal a
+ * caller uses to warn that support is unconfirmed off Anthropic's own host.
+ */
+export function isAnthropicOfficialHost(model: CustomChatModel | null | undefined): boolean {
+    if (!model || model.format !== 'anthropic') return false;
+    return hostOf(model.api_base?.trim() ?? '') === 'api.anthropic.com';
+}
+
 /** Whether a run on this model can request hosted web search today. */
 export function isHostedWebSearchAvailable(model: CustomChatModel | null | undefined): boolean {
     const kind = supportsHostedWebSearch(model);

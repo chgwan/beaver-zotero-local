@@ -120,32 +120,69 @@ describe('localWebSearchStatusAtom', () => {
     it('is off while the preference is off, whatever the provider', () => {
         const store = createStore();
         select(store, anthropic);
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'off', kind: 'anthropic' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: false,
+            reason: 'off',
+            kind: 'anthropic',
+            hostUnconfirmed: false,
+        });
     });
 
     it('is available for an Anthropic, OpenRouter or OpenAI model once enabled', () => {
         const store = createStore();
         prefs.set('localWebSearch', true);
         select(store, anthropic);
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'anthropic' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: true,
+            reason: null,
+            kind: 'anthropic',
+            hostUnconfirmed: false,
+        });
 
         select(store, { ...custom, api_base: 'https://openrouter.ai/api/v1' });
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'openrouter' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: true,
+            reason: null,
+            kind: 'openrouter',
+            hostUnconfirmed: false,
+        });
 
         select(store, { ...custom, api_base: 'https://api.openai.com/v1' });
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: true, reason: null, kind: 'openai-responses' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: true,
+            reason: null,
+            kind: 'openai-responses',
+            hostUnconfirmed: false,
+        });
     });
 
     it('is unsupported for providers without an available hosted search', () => {
         const store = createStore();
         prefs.set('localWebSearch', true);
         select(store, custom);
-        expect(store.get(localWebSearchStatusAtom)).toEqual({ available: false, reason: 'unsupported', kind: null });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: false,
+            reason: 'unsupported',
+            kind: null,
+            hostUnconfirmed: false,
+        });
     });
 
     it('reports no model when the selection cannot run locally', () => {
         const store = createStore();
         prefs.set('localWebSearch', true);
         expect(store.get(localWebSearchStatusAtom)).toMatchObject({ available: false, reason: 'no_model' });
+    });
+
+    it('flags an Anthropic-format model whose endpoint is not api.anthropic.com as unconfirmed', () => {
+        const store = createStore();
+        prefs.set('localWebSearch', true);
+        select(store, { ...anthropic, api_base: 'https://my-proxy.example.com' });
+        expect(store.get(localWebSearchStatusAtom)).toEqual({
+            available: true,
+            reason: null,
+            kind: 'anthropic',
+            hostUnconfirmed: true,
+        });
     });
 });

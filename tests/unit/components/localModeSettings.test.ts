@@ -114,6 +114,17 @@ describe('localWebSearchCapabilityLabel', () => {
     it('says web search is not available when the model has no hosted-search capability', () => {
         expect(localWebSearchCapabilityLabel(null)).toBe('Not available for this provider');
     });
+
+    it('warns that support is unconfirmed for an Anthropic-format model off the official host', () => {
+        expect(localWebSearchCapabilityLabel('anthropic', true)).toBe(
+            'Anthropic hosted search (may not be supported by this endpoint)'
+        );
+    });
+
+    it('omits the endpoint warning when the host is confirmed', () => {
+        expect(localWebSearchCapabilityLabel('anthropic', false)).toBe('Anthropic hosted search');
+        expect(localWebSearchCapabilityLabel('anthropic')).toBe('Anthropic hosted search');
+    });
 });
 
 describe('localWebSearchDescription', () => {
@@ -129,5 +140,9 @@ describe('localWebSearchDescription', () => {
 
     it('falls back to the unavailable label when the model has no capability', () => {
         expect(localWebSearchDescription(null)).toContain('Not available for this provider');
+    });
+
+    it('includes the endpoint warning when the host is unconfirmed', () => {
+        expect(localWebSearchDescription('anthropic', true)).toContain('may not be supported by this endpoint');
     });
 });

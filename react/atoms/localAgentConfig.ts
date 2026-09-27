@@ -10,6 +10,7 @@ import {
     type LocalConfigResult,
 } from '@beaver/agent-local/config/localAgentConfig';
 import {
+    isAnthropicOfficialHost,
     isHostedWebSearchAvailable,
     supportsHostedWebSearch,
     type HostedWebSearchKind,
@@ -78,14 +79,23 @@ export interface LocalWebSearchStatus {
     available: boolean;
     reason: 'off' | 'no_model' | 'unsupported' | null;
     kind: HostedWebSearchKind | null;
+    /**
+     * True when `kind` is `'anthropic'` but the endpoint is not
+     * `api.anthropic.com` — the hosted `web_search` server tool is confirmed
+     * to work only on Anthropic's own API, so a same-format proxy's support
+     * for it is unconfirmed. Always false for every other kind, since those
+     * are only ever reported for their one exact, matching host.
+     */
+    hostUnconfirmed: boolean;
 }
 
 export const localWebSearchStatusAtom = atom<LocalWebSearchStatus>((get) => {
     const status = get(localModeStatusAtom);
     const model = status.ok ? status.config.model : null;
     const kind = supportsHostedWebSearch(model);
-    if (!get(localSearchConfigAtom).webSearch) return { available: false, reason: 'off', kind };
-    if (!model) return { available: false, reason: 'no_model', kind };
-    if (!isHostedWebSearchAvailable(model)) return { available: false, reason: 'unsupported', kind };
-    return { available: true, reason: null, kind };
+    const hostUnconfirmed = kind === 'anthropic' && !isAnthropicOfficialHost(model);
+    if (!get(localSearchConfigAtom).webSearch) return { available: false, reason: 'off', kind, hostUnconfirmed };
+    if (!model) return { available: false, reason: 'no_model', kind, hostUnconfirmed };
+    if (!isHostedWebSearchAvailable(model)) return { available: false, reason: 'unsupported', kind, hostUnconfirmed };
+    return { available: true, reason: null, kind, hostUnconfirmed };
 });
