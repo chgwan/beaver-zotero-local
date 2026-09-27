@@ -26,6 +26,7 @@ import type {
     WSErrorEvent,
     ZoteroInstanceWire,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import type { BeaverAgentPrompt } from '@beaver/agent-core/agents/types';
 import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import type { ConnectRecoveryAuthFields } from '@beaver/agent-core/transport/connectionFailure';
 import { resolveDefaultAgentDataProvider } from '@beaver/agent-core/transport/agentDataDispatch';
@@ -35,6 +36,7 @@ import { resolveLocalAgentConfig } from '@beaver/agent-local/config/localAgentCo
 import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
 import { runLocalAgentLoop } from '@beaver/agent-local/run/localAgentLoop';
 import { buildRunHistory } from '@beaver/agent-local/run/runHistory';
+import { scopePromptToLibraries } from '@beaver/agent-local/run/userPrompt';
 import { buildToolCatalog } from '@beaver/agent-local/tools/toolCatalog';
 import { getSearchableLibraryIds } from '../../src/services/agentDataProvider/utils';
 import { readAttachmentEntry } from '../../src/services/agentDataProvider/handleReadAttachmentRequest';
@@ -85,7 +87,15 @@ export class LocalAgentService {
 
         let catalog: ReturnType<typeof buildToolCatalog>;
         let history: ReturnType<typeof buildRunHistory>;
+        let userPrompt: BeaverAgentPrompt;
         try {
+            // One scope snapshot for the whole run: the tools, this prompt and
+            // the replayed history all see the same searchable libraries, and
+            // nothing from an excluded library reaches the model.
+            const searchableLibraryIds = getSearchableLibraryIds();
+            const searchable = new Set(searchableLibraryIds);
+            const isLibrarySearchable = (libraryId: number) => searchable.has(libraryId);
+            userPrompt = scopePromptToLibraries(request.user_prompt, isLibrarySearchable);
             catalog = buildToolCatalog({
                 // The shared map's document entry answers in the backend wire
                 // format; the local reader returns a bounded page window instead.
@@ -93,10 +103,11 @@ export class LocalAgentService {
                     ...resolveDefaultAgentDataProvider({}),
                     read_attachment_request: readAttachmentEntry,
                 },
-                searchableLibraryIds: getSearchableLibraryIds(),
+                searchableLibraryIds,
             });
             history = buildRunHistory(store.get(threadRunsAtom), request.thread_id ?? null, {
                 contextWindow: config.model.context_window,
+                isLibrarySearchable,
             });
         } catch (error) {
             callbacks.onError(localError(request.run_id, 'local_agent_error', describeError(error)));
@@ -115,7 +126,7 @@ export class LocalAgentService {
             runId: request.run_id,
             threadId: request.thread_id ?? null,
             newThreadId: () => uuidv4(),
-            userPrompt: request.user_prompt,
+            userPrompt,
             history,
             config,
             client: clientForFormat(config.model.format ?? 'openai'),

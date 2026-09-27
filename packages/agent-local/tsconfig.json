@@ -43,6 +43,7 @@
     "./src/run/frameEmitter.ts",
     "./src/run/systemPrompt.ts",
     "./src/run/toolReturnMetadata.ts",
+    "./src/run/userPrompt.ts",
     "./src/run/localAgentLoop.ts",
     "./src/run/runHistory.ts",
     "./src/index.ts"

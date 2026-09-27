@@ -110,6 +110,36 @@ describe('buildRunHistory', () => {
         ]);
     });
 
+    it('renders earlier prompts with their context, dropping context from libraries outside the scope', () => {
+        const runs = [
+            run('r1', '/explain', [response('r1', [text('done')])], {
+                user_prompt: {
+                    content: '/explain',
+                    actions: [{ command: 'explain', action_id: 'a', prompt: 'Explain the method.' }],
+                    attachments: [
+                        { type: 'item', library_id: 1, library_ref: 'u', zotero_key: 'ITEMKEY1' },
+                        { type: 'item', library_id: 9, zotero_key: 'SECRET01' },
+                    ],
+                },
+            }),
+        ];
+
+        const [user] = buildRunHistory(runs, 'thread-1', { isLibrarySearchable: (id) => id === 1 });
+        expect(user.role).toBe('user');
+        expect(user.content).toContain('Explain the method.');
+        expect(user.content).toContain('u-ITEMKEY1');
+        expect(user.content).not.toContain('SECRET01');
+    });
+
+    it('drops all library context from earlier prompts when no scope check is given', () => {
+        const runs = [
+            run('r1', 'q', [response('r1', [text('a')])], {
+                user_prompt: { content: 'q', attachments: [{ type: 'item', library_id: 1, zotero_key: 'ITEMKEY1' }] },
+            }),
+        ];
+        expect(buildRunHistory(runs, 'thread-1')[0]).toEqual({ role: 'user', content: 'q' });
+    });
+
     it('drops a tool call that never got a return, and a return with no call', () => {
         const runs = [
             run('r1', 'q', [

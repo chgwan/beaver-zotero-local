@@ -171,6 +171,27 @@ describe('runLocalAgentLoop', () => {
         expect(messages[3].content).toBe('and now?');
     });
 
+    it('sends the rendered user prompt: text plus action prompts, attachments and reader state', async () => {
+        const client = scriptedClient([{ textChunks: ['Ready.'] }]);
+        await run(client, callbacks, stubCatalog(), {
+            userPrompt: {
+                content: '/summarize',
+                actions: [{ command: 'summarize', action_id: 'a', prompt: 'Summarize in three bullets.' }],
+                attachments: [{ type: 'note', library_id: 1, library_ref: 'u', zotero_key: 'NOTEKEY1' }],
+                application_state: {
+                    current_view: 'file_reader',
+                    reader_state: { library_id: 1, library_ref: 'u', zotero_key: 'PDFKEY01', current_page: 4 },
+                },
+            },
+        });
+        const user = client.streamTurn.mock.calls[0][0].messages[1];
+        expect(user.role).toBe('user');
+        expect(user.content).toContain('/summarize');
+        expect(user.content).toContain('Summarize in three bullets.');
+        expect(user.content).toContain('u-NOTEKEY1');
+        expect(user.content).toContain('attachment u-PDFKEY01, on page 4');
+    });
+
     it('offers the catalog definitions to the provider', async () => {
         const client = scriptedClient([{ textChunks: ['Ready.'] }]);
         await run(client, callbacks);
