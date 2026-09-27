@@ -13,7 +13,13 @@ import { refreshCustomModelsAtom } from "../../atoms/models";
 import { localModeEnabledAtom } from "../../atoms/localMode";
 import { localModeStatusAtom } from "../../atoms/localAgentConfig";
 import { usePreference } from "../../hooks/usePreference";
-import { needsLocalModeRestart, parseLocalMaxRoundsInput } from "./localModeSettings";
+import {
+    LOCAL_ROUND_CAP_DESCRIPTION,
+    needsLocalModeRestart,
+    parseLocalMaxRoundsInput,
+    showLocalRoundCap,
+} from "./localModeSettings";
+import { DEFAULT_MAX_ROUNDS } from "@beaver/agent-local/config/localAgentConfig";
 import {
     CustomChatModel,
     getCustomChatModelsForEditing,
@@ -176,23 +182,25 @@ const ApiKeysSection: React.FC = () => {
                         />
                     }
                 />
-                <SettingsRow
-                    hasBorder
-                    title="Round cap"
-                    description="Limit how many tool-calling rounds a single run can take before it stops. Leave blank for the default (20)."
-                    control={
-                        <input
-                            type="text"
-                            inputMode="numeric"
-                            value={maxRoundsText}
-                            onChange={(e) => handleMaxRoundsChange(e.target.value)}
-                            placeholder="20"
-                            aria-label="Maximum tool-calling rounds"
-                            className="chat-input text-base font-color-primary"
-                            style={{ width: '80px', textAlign: 'right' }}
-                        />
-                    }
-                />
+                {showLocalRoundCap(localModePref, localModeActive) && (
+                    <SettingsRow
+                        hasBorder
+                        title="Round cap"
+                        description={LOCAL_ROUND_CAP_DESCRIPTION}
+                        control={
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                value={maxRoundsText}
+                                onChange={(e) => handleMaxRoundsChange(e.target.value)}
+                                placeholder={String(DEFAULT_MAX_ROUNDS)}
+                                aria-label="Maximum tool-calling rounds"
+                                className="chat-input text-base font-color-primary"
+                                style={{ width: '80px', textAlign: 'right' }}
+                            />
+                        }
+                    />
+                )}
                 {localModeActive && (
                     <SettingsRow
                         hasBorder

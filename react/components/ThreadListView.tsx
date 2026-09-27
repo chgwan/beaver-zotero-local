@@ -49,7 +49,7 @@ export function threadListEmptyMessage({
 }): string {
     if (activeQuery) return 'No matching chats';
     if (filterLabel) return `No chats about ${filterLabel}`;
-    if (localMode) return 'Chats are kept only for this session in local mode.';
+    if (localMode) return "Chats aren't saved in local mode.";
     return 'No chats yet';
 }
 

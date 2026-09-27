@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { threadListEmptyMessage } from '../../../react/components/ThreadListView';
 
 describe('threadListEmptyMessage', () => {
-    it('names a local-mode session when nothing is filtered or searched', () => {
+    it('says chats are not saved in local mode when nothing is filtered or searched', () => {
         expect(threadListEmptyMessage({ activeQuery: '', filterLabel: null, localMode: true }))
-            .toBe('Chats are kept only for this session in local mode.');
+            .toBe("Chats aren't saved in local mode.");
     });
 
     it('falls back to the ordinary empty message in cloud mode', () => {
