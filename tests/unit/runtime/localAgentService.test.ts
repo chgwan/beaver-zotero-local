@@ -22,6 +22,9 @@ vi.mock('@beaver/agent-local/tools/toolCatalog', () => ({ buildToolCatalog: buil
 vi.mock('@beaver/agent-core/transport/agentDataDispatch', () => ({
     resolveDefaultAgentDataProvider: resolveProviderMock,
 }));
+vi.mock('../../../src/services/agentDataProvider/handleReadAttachmentRequest', () => ({
+    readAttachmentEntry: { readAttachment: true },
+}));
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraryIds: getSearchableLibraryIdsMock,
 }));
@@ -104,7 +107,7 @@ beforeEach(() => {
 });
 
 describe('LocalAgentService.connect', () => {
-    it('builds a catalog over the plugin-realm scope and starts the loop once', async () => {
+    it('builds a catalog over the plugin-realm scope, with the local attachment reader, and starts the loop once', async () => {
         pendingLoop();
         const service = new LocalAgentService();
         const cb = callbacks();
@@ -113,7 +116,7 @@ describe('LocalAgentService.connect', () => {
 
         expect(resolveProviderMock).toHaveBeenCalledTimes(1);
         expect(buildToolCatalogMock).toHaveBeenCalledWith({
-            provider: { provider: true },
+            provider: { provider: true, read_attachment_request: { readAttachment: true } },
             searchableLibraryIds: [1, 2],
         });
         expect(runLoopMock).toHaveBeenCalledTimes(1);
