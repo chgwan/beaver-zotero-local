@@ -37,6 +37,7 @@ import { store } from "../../../react/store";
 import { recentThreadsAtom } from "../../../react/atoms/threads";
 import { threadEntitiesAtom, pinsPendingAtom } from "../../../react/atoms/threadList";
 import { attachAccountProjection } from "../../../react/runtime/accountProjection";
+import { localAgentService } from "../../../react/runtime/localAgentService";
 import {
     loginStepAtom,
     otpResendCountdownAtom,
@@ -98,6 +99,23 @@ describe("account projection transitions", () => {
         snapshot = { ...snapshot, ...patch, revision: snapshot.revision + 1 };
         publish(snapshot);
     };
+    it("stops the local run when a local exclusion edit narrows the scope", () => {
+        const close = vi.spyOn(localAgentService, "close").mockImplementation(() => {});
+        (Zotero.Beaver as any).localMode = true;
+        (Zotero.Beaver as any).searchableLibraryIds = [1, 2];
+        emit({ scopeReady: true });
+        expect(close).not.toHaveBeenCalled();
+
+        (Zotero.Beaver as any).searchableLibraryIds = [1];
+        emit({});
+        expect(close).toHaveBeenCalledWith(1000, "Library access changed");
+
+        close.mockClear();
+        (Zotero.Beaver as any).searchableLibraryIds = [1, 2];
+        emit({});
+        expect(close).not.toHaveBeenCalled();
+    });
+
     it("leaves repository projections intact when account hydration follows repository publication", () => {
         const entities = new Map([['fresh', {
             id: 'fresh', name: 'Current account', createdAt: '', updatedAt: '', isPinned: false,

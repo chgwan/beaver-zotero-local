@@ -247,15 +247,10 @@ it('draws checkboxes from the local preference in local mode, without waiting on
     });
 });
 
-it('shows no restart notice when the pending edit already matches what is in effect', async () => {
-    await render(storeWithLocalMode({ localExcludedRaw: '[{"type":"user"}]', searchableLibraryIds: [2] }), (container) => {
-        expect(container.querySelector('[role="status"]')).toBeNull();
-    });
-});
-
-it('shows a restart notice when a pending local edit has not taken effect yet', async () => {
+it('asks for no restart after a local exclusion edit, which applies at once', async () => {
     await render(storeWithLocalMode({ localExcludedRaw: '[{"type":"user"}]', searchableLibraryIds: [1, 2] }), (container) => {
-        expect(container.querySelector('[role="status"]')?.textContent).toContain('Restart Zotero to apply');
+        expect(container.querySelector('[role="status"]')).toBeNull();
+        expect(container.textContent).not.toContain('Restart Zotero');
     });
 });
 
