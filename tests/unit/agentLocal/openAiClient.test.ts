@@ -415,3 +415,109 @@ describe('createOpenAiClient', () => {
         expect(failure.kind).toBe('cancelled');
     });
 });
+
+describe('createOpenAiClient hosted web search', () => {
+    const openRouterModel = { ...model, snapshot: 'anthropic/claude-sonnet-4.5', api_base: 'https://openrouter.ai/api/v1' };
+    const bodyOf = (fetchMock: any, call = 0) => JSON.parse(fetchMock.mock.calls[call][1].body);
+    const DONE = 'data: [DONE]\n\n';
+
+    it('adds the OpenRouter web search server tool for an OpenRouter model', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(DONE));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(
+            turn({ model: openRouterModel, tools: [ZOTERO_SEARCH_TOOL], webSearch: { enabled: true, maxUses: 3 } }),
+            handlers(),
+            signal()
+        );
+        const body = bodyOf(fetchMock);
+        expect(body.tools).toHaveLength(2);
+        expect(body.tools[1]).toEqual({ type: 'openrouter:web_search', parameters: { max_uses: 3 } });
+        expect(body.plugins).toBeUndefined();
+    });
+
+    it('sends the server tool alone when the turn has no local tools', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(DONE));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(turn({ model: openRouterModel, webSearch: { enabled: true } }), handlers(), signal());
+        expect(bodyOf(fetchMock).tools).toEqual([{ type: 'openrouter:web_search' }]);
+    });
+
+    it('adds nothing when web search is off', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(DONE));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(turn({ model: openRouterModel, webSearch: { enabled: false } }), handlers(), signal());
+        expect(bodyOf(fetchMock).tools).toBeUndefined();
+    });
+
+    it('adds nothing for a provider without a supported hosted search, even if asked', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(sseResponse(DONE));
+        vi.stubGlobal('fetch', fetchMock);
+        await createOpenAiClient().streamTurn(turn({ webSearch: { enabled: true } }), handlers(), signal());
+        await createOpenAiClient().streamTurn(
+            turn({ model: { ...model, api_base: 'http://localhost:11434/v1' }, webSearch: { enabled: true } }),
+            handlers(),
+            signal()
+        );
+        for (const call of [0, 1]) {
+            const body = bodyOf(fetchMock, call);
+            expect(body.tools).toBeUndefined();
+            expect(body.plugins).toBeUndefined();
+            expect(body.web_search_options).toBeUndefined();
+        }
+    });
+
+    it('collects url_citation annotations into citations, unique by URL', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"content":"Born 1916."}}]}\n\n',
+                    'data: {"choices":[{"delta":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example/1","title":"A","start_index":0,"end_index":5}}]}}]}\n\n',
+                    'data: {"choices":[{"delta":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example/1","title":"A"}},{"type":"url_citation","url_citation":{"url":"https://b.example/2","title":""}}]},"finish_reason":"stop"}]}\n\n',
+                    DONE
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn({ model: openRouterModel, webSearch: { enabled: true } }), handlers(), signal());
+        expect(result.text).toBe('Born 1916.');
+        expect(result.citations).toEqual([
+            { url: 'https://a.example/1', title: 'A' },
+            { url: 'https://b.example/2', title: 'https://b.example/2' },
+        ]);
+    });
+
+    it('also reads annotations from a message object on the chunk', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'data: {"choices":[{"delta":{"content":"x"},"message":{"annotations":[{"type":"url_citation","url_citation":{"url":"https://c.example","title":"C"}}]}}]}\n\n',
+                    DONE
+                )
+            )
+        );
+        const result = await createOpenAiClient().streamTurn(turn({ model: openRouterModel, webSearch: { enabled: true } }), handlers(), signal());
+        expect(result.citations).toEqual([{ url: 'https://c.example', title: 'C' }]);
+    });
+
+    it('reports a web-search-specific error when the provider rejects the web tool', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(errorResponse(400, 'Bad Request', '{"error":{"message":"Server tool openrouter:web_search is not supported for this model"}}'))
+        );
+        const failure = await createOpenAiClient()
+            .streamTurn(turn({ model: openRouterModel, webSearch: { enabled: true } }), handlers(), signal())
+            .catch((e) => e);
+        expect(failure).toBeInstanceOf(LlmRequestError);
+        expect(failure.kind).toBe('bad_request');
+        expect(failure.message).toMatch(/web search is not available for this provider or model/i);
+    });
+
+    it('leaves an unrelated 400 unchanged', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(400, 'Bad Request', '{"error":{"message":"context too long"}}')));
+        const failure = await createOpenAiClient()
+            .streamTurn(turn({ model: openRouterModel, webSearch: { enabled: true } }), handlers(), signal())
+            .catch((e) => e);
+        expect(failure.message).toBe('context too long');
+    });
+});
