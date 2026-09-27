@@ -201,7 +201,9 @@ async function runToolCall(call: AccumulatedToolCall, catalog: LocalToolCatalog,
         outcome: 'success',
         content: result.content,
         transcriptText: result.text,
-        metadata: buildToolReturnMetadata(call.name, result.content, call.args),
+        // A tool that supplies its own render metadata knows its card best;
+        // handler tools get theirs derived from the response.
+        metadata: result.metadata ?? buildToolReturnMetadata(call.name, result.content, call.args),
     };
 }
 

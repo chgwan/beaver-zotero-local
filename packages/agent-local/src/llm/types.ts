@@ -7,7 +7,7 @@
  */
 
 import type { CustomChatModel } from '@beaver/agent-core/types/customChatModel';
-import type { LocalToolDefinition } from '../tools/toolSchemas';
+import type { ToolSpec } from '../tools/toolSchemas';
 import type { AccumulatedToolCall } from './toolCallAccumulator';
 
 export interface LlmMessage {
@@ -46,7 +46,7 @@ export interface LlmTurnResult {
 export interface LlmTurnRequest {
     model: CustomChatModel;
     messages: LlmMessage[];
-    tools: LocalToolDefinition[];
+    tools: ToolSpec[];
     /**
      * `'none'` forbids tool calls this turn while still declaring the tools,
      * which a transcript that already contains tool calls needs. Defaults to

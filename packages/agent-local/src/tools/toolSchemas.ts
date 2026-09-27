@@ -48,6 +48,12 @@ export interface LocalToolDefinition {
     buildRequest: (args: ToolArgs, requestId: string, limits?: ToolRequestLimits) => ToolRequest;
 }
 
+/**
+ * The part of a tool definition the model sees: what the LLM clients send as
+ * the tool declaration. Handler-backed and native tools share it.
+ */
+export type ToolSpec = Pick<LocalToolDefinition, 'name' | 'description' | 'parameters'>;
+
 /** Facts about the run's model that bound how much a tool may return. */
 export interface ToolRequestLimits {
     /** The model's context window in tokens, when known. */

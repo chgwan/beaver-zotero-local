@@ -698,7 +698,8 @@ function computeMainLabel(
         }
 
         // === External search tools ===
-        case 'external_search': {
+        case 'external_search':
+        case 'scholarly_search': {
             const searchLabel = args.search_label as string | undefined;
             const query = args.query as string | undefined;
             const label = searchLabel || (query ? truncate(query, 60) : null);

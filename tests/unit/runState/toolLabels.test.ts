@@ -42,4 +42,11 @@ describe('getToolCallLabel', () => {
         expect(getToolCallLabel(part, 'completed', { noChange: true }))
             .toBe('Import items: no change needed');
     });
+
+    it('labels scholarly_search as a literature search with its query, not a web search', () => {
+        const part = toolCall({ tool_name: 'scholarly_search', args: { query: 'graphene superconductivity' } });
+        expect(getToolCallLabel(part, 'completed')).toBe('Literature search: graphene superconductivity');
+        expect(getToolCallLabel(toolCall({ tool_name: 'scholarly_search', args: {} }), 'in_progress'))
+            .toBe('Literature search');
+    });
 });
