@@ -51,6 +51,7 @@
     "./src/search/types.ts",
     "./src/search/openAlex.ts",
     "./src/search/semanticScholar.ts",
+    "./src/search/scholarlySearch.ts",
     "./src/index.ts"
   ]
 }
