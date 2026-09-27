@@ -8,12 +8,9 @@ import {
     allLibrariesExcludedAtom,
     excludedEntryKey,
     excludedLibrariesAtom,
-    excludedLibraryIdsAtom,
-    excludedIdSetsDiffer,
     isProfileLoadedAtom,
     libraryExclusionKey,
     localExcludedLibraryEntriesAtom,
-    pendingExcludedLibraryIdsAtom,
     profileWithPlanAtom,
 } from '../../atoms/profile';
 import {
@@ -89,11 +86,6 @@ const LibraryAccessList: React.FC = () => {
     const profile = useAtomValue(profileWithPlanAtom);
     const profileReady = localMode || (profileLoaded && profile !== null);
     const allLibrariesExcludedInEffect = useAtomValue(allLibrariesExcludedAtom);
-    const pendingExcludedIds = useAtomValue(pendingExcludedLibraryIdsAtom);
-    const effectiveExcludedIds = useAtomValue(excludedLibraryIdsAtom);
-    // Local mode saves to a preference the plugin realm only re-reads at
-    // startup, so a pending edit needs a restart before it takes effect.
-    const needsRestart = localMode && excludedIdSetsDiffer(pendingExcludedIds, effectiveExcludedIds);
     const isUpdating = useAtomValue(isUpdatingExcludedLibrariesAtom);
     const toggleExcludedLibrary = useSetAtom(toggleExcludedLibraryAtom);
 
@@ -140,9 +132,9 @@ const LibraryAccessList: React.FC = () => {
         [excludedLibraries],
     );
     const personalExcluded = isPersonalLibraryExcluded(excludedLibraries);
-    // In local mode the checkboxes reflect the pending edit, so the "all
-    // excluded" warning must match that rather than the (possibly stale,
-    // pre-restart) in-effect scope.
+    // In local mode the checkboxes reflect the saved preference, so the "all
+    // excluded" warning follows it too rather than waiting for the plugin
+    // realm to re-publish the scope.
     const allLibrariesExcludedPending = allLibraries !== null && allLibraries.length > 0
         && allLibraries.every((library) => excludedKeys.has(libraryExclusionKey(library)));
     const allLibrariesExcluded = localMode ? allLibrariesExcludedPending : allLibrariesExcludedInEffect;
@@ -176,16 +168,6 @@ const LibraryAccessList: React.FC = () => {
                                 ? "All libraries are unchecked. Beaver can't access any libraries."
                                 : 'Your personal library is unchecked, so Beaver cannot use it on any of your devices.'}
                     </span>
-                </div>
-            )}
-
-            {needsRestart && (
-                <div
-                    role="status"
-                    className="display-flex flex-row items-start gap-2 text-sm p-2 rounded-md"
-                    style={{ color: 'var(--fill-secondary)', border: '1px solid var(--fill-quinary)', background: 'var(--fill-quinary)' }}
-                >
-                    <span>Restart Zotero to apply this change.</span>
                 </div>
             )}
 

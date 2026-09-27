@@ -36,10 +36,10 @@ function isExcludedLibraryEntry(value: unknown): value is ExcludedLibrary {
 /**
  * Parses the `localExcludedLibraries` preference's raw JSON text.
  *
- * Returns `null` for anything that is not a JSON array of valid entries —
- * the same shape the plugin realm requires at startup (see
- * `src/services/instanceAccount.ts`). Callers must treat `null` as "unknown
- * / invalid", never as "empty".
+ * Returns `null` for anything that is not a JSON array of valid entries.
+ * The plugin realm's account and the settings UI both read the preference
+ * through this parser, so they always agree on what it means. Callers must
+ * treat `null` as "unknown / invalid", never as "empty".
  */
 export function parseLocalExcludedLibraries(raw: string): ExcludedLibrary[] | null {
     if (raw === "") return [];
@@ -56,10 +56,10 @@ export function parseLocalExcludedLibraries(raw: string): ExcludedLibrary[] | nu
 }
 
 /**
- * Reads and parses the `localExcludedLibraries` preference for display in
- * settings. `null` means the stored value is invalid — the plugin realm
- * itself will have failed closed (no searchable libraries) until it is
- * fixed, so surface that rather than guessing at a list.
+ * Reads and parses the `localExcludedLibraries` preference. `null` means the
+ * stored value is invalid: the plugin realm fails closed (no searchable
+ * libraries) until it is fixed, and settings surface that rather than
+ * guessing at a list.
  */
 export function readLocalExcludedLibrariesPref(): ExcludedLibrary[] | null {
     const raw = getPref("localExcludedLibraries");

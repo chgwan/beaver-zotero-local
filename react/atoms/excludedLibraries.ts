@@ -32,8 +32,9 @@ export const toggleExcludedLibraryAtom = atom(
     async (get, set, library: ZoteroLibrary) => {
         if (get(localModeEnabledAtom)) {
             // No profile in local mode: the exclusion list lives in the
-            // `localExcludedLibraries` preference, and this edit only takes
-            // effect after a restart (the plugin realm reads it once at startup).
+            // `localExcludedLibraries` preference. The plugin realm observes
+            // it and re-publishes the searchable scope, so the edit applies
+            // at once.
             const current = get(localExcludedLibraryEntriesAtom) ?? [];
             const next = nextExcludedLibraries(current, library);
             try {

@@ -28,6 +28,8 @@ import { registerZoteroSupabaseStorage } from "./zoteroSupabaseStorage";
 import { registerZoteroClientIdentity } from "./zoteroClientIdentity";
 import { prepareServiceRealm } from "../runtime/realm";
 import { getPref, setPref } from "../utils/prefs";
+import { readLocalExcludedLibrariesPref } from "./libraryScope";
+import { config } from "../../package.json";
 import { libraryRefForLibraryID } from "../utils/libraryIdentity";
 import { clearUserScopedPrefs } from "../utils/clearUserScopedPrefs";
 
@@ -79,46 +81,28 @@ const freeze = <T>(value: T): T => {
 const excludedLibraryKey = (entry: ExcludedLibrary): string =>
     entry.type === "group" ? `group:${entry.group_id}` : "user";
 
-const isExcludedLibrary = (value: unknown): value is ExcludedLibrary => {
-    if (!value || typeof value !== "object") return false;
-    const entry = value as { type?: unknown; group_id?: unknown };
-    return (
-        entry.type === "user" ||
-        (entry.type === "group" && typeof entry.group_id === "number")
-    );
-};
+/** Full name of the local exclusion-list preference, as the pref observer reports it. */
+const LOCAL_EXCLUSIONS_PREF = `${config.prefsPrefix}.localExcludedLibraries`;
 
 /**
  * Read the local-mode exclusion list from the `localExcludedLibraries` pref.
  *
- * Returns `null` when the value cannot be trusted: not JSON, not an array, or
- * any entry that is not a well-formed exclusion. The exclusion list is an
- * access-control boundary, so the caller then treats every library as
- * excluded rather than guessing which ones the user meant. The problem is
- * reported through `Zotero.logError`; it never throws, so startup continues.
+ * Returns `null` when the value cannot be trusted (see
+ * `parseLocalExcludedLibraries`). The exclusion list is an access-control
+ * boundary, so the caller then treats every library as excluded rather than
+ * guessing which ones the user meant. The problem is reported through
+ * `Zotero.logError`; it never throws.
  */
 function readLocalExcludedLibraries(): ExcludedLibrary[] | null {
-    const raw = getPref("localExcludedLibraries");
-    if (raw === undefined || raw === "") return [];
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(String(raw));
-    } catch {
-        parsed = undefined;
-    }
-    if (!Array.isArray(parsed) || !parsed.every(isExcludedLibrary)) {
+    const entries = readLocalExcludedLibrariesPref();
+    if (!entries) {
         Zotero.logError(
             new Error(
                 "Beaver: the localExcludedLibraries preference is invalid; no libraries are searchable in local mode until it is fixed.",
             ),
         );
-        return null;
     }
-    return parsed.map((entry) =>
-        entry.type === "group"
-            ? { type: "group", group_id: entry.group_id }
-            : { type: "user" },
-    );
+    return entries;
 }
 
 /** The local user and group libraries, in the shape the account publishes. */
@@ -213,8 +197,16 @@ export class InstanceAccount {
     readonly auth: SupabaseClient["auth"];
     readonly client: SupabaseClient;
     private readonly localMode: boolean;
-    /** Local-mode exclusions, read once at start; `null` means invalid, so nothing is searchable. */
+    /** Local-mode exclusions, re-read whenever the pref changes; `null` means invalid, so nothing is searchable. */
     private localExclusions: ExcludedLibrary[] | null = null;
+    private observingExclusions = false;
+    private readonly exclusionsObserver = {
+        observe: () => {
+            if (!this.localMode || this.disposed) return;
+            this.localExclusions = readLocalExcludedLibraries();
+            this.publish();
+        },
+    };
 
     constructor(
         private sdk: SupabaseClient = supabase,
@@ -339,6 +331,12 @@ export class InstanceAccount {
     private startLocal(): void {
         if (this.disposed || this.snapshot.initialized) return;
         this.localExclusions = readLocalExcludedLibraries();
+        // An edit in Preferences applies at once: renderers see the narrower
+        // scope on the next snapshot and stop a run that relied on it.
+        if (typeof Services !== "undefined" && Services.prefs?.addObserver) {
+            Services.prefs.addObserver(LOCAL_EXCLUSIONS_PREF, this.exclusionsObserver);
+            this.observingExclusions = true;
+        }
         this.snapshot.initialized = true;
         this.snapshot.session = null;
         this.snapshot.data = null;
@@ -834,6 +832,10 @@ export class InstanceAccount {
                 "network:offline-status-changed",
             );
             this.observingNetwork = false;
+        }
+        if (this.observingExclusions) {
+            Services.prefs.removeObserver(LOCAL_EXCLUSIONS_PREF, this.exclusionsObserver);
+            this.observingExclusions = false;
         }
         this.authSubscription?.unsubscribe();
         this.listeners.clear();

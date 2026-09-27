@@ -187,43 +187,14 @@ export const excludedLibraryIdsAtom = selectAtom(
 
 /**
  * The local exclusion list as currently stored in the `localExcludedLibraries`
- * preference. In local mode the plugin realm only re-reads this at startup,
- * so an edit here is "pending" until the app restarts — it is not yet the
- * list in effect (`excludedLibraryIdsAtom`). `null` means the stored value
- * is invalid.
+ * preference. In local mode the plugin realm observes the same preference and
+ * re-publishes the searchable scope when it changes. `null` means the stored
+ * value is invalid.
  */
 export const localExcludedLibraryEntriesAtom = atom<ExcludedLibrary[] | null>((get) => {
     get(preferencesRevisionAtom);
     return readLocalExcludedLibrariesPref();
 });
-
-const pendingExcludedLibraryIdsSourceAtom = atom<number[]>((get) => {
-    const entries = get(localExcludedLibraryEntriesAtom);
-    if (!entries) return [];
-    const excluded = new Set(entries.map(excludedEntryKey));
-    return get(localZoteroLibrariesAtom)
-        .filter(lib => excluded.has(libraryExclusionKey(lib)))
-        .map(lib => lib.library_id);
-});
-
-/**
- * Local library IDs the pending `localExcludedLibraries` preference would
- * exclude, projected onto the current local library list. Compare against
- * {@link excludedLibraryIdsAtom} (the set actually in effect) to detect an
- * edit that needs a restart to apply.
- */
-export const pendingExcludedLibraryIdsAtom = selectAtom(
-    pendingExcludedLibraryIdsSourceAtom,
-    (ids) => ids,
-    sameIds
-);
-
-/** Order-insensitive inequality for two id lists — true when a pending edit differs from what's in effect. */
-export function excludedIdSetsDiffer(a: readonly number[], b: readonly number[]): boolean {
-    if (a.length !== b.length) return true;
-    const setA = new Set(a);
-    return b.some((id) => !setA.has(id));
-}
 
 /**
  * Whether the library-access snapshot is ready to make allow/deny decisions.

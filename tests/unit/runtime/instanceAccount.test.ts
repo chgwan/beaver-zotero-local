@@ -659,6 +659,7 @@ describe("instance account in local mode", () => {
         vi.stubGlobal("Services", {
             io: { offline: false },
             obs: { addObserver: vi.fn(), removeObserver: vi.fn() },
+            prefs: { addObserver: vi.fn(), removeObserver: vi.fn() },
         });
         (Zotero as any).logError = vi.fn();
         beaver = {
@@ -736,12 +737,46 @@ describe("instance account in local mode", () => {
         },
     );
 
-    it("reads the exclusion list once at start", () => {
+    const EXCLUSIONS_PREF = "extensions.zotero.beaver.localExcludedLibraries";
+    const prefObserver = () => {
+        const call = vi.mocked(Services.prefs.addObserver).mock.calls.find(([key]) => key === EXCLUSIONS_PREF);
+        if (!call) throw new Error("no exclusion-list observer registered");
+        return call[1] as { observe: (subject: unknown, topic: string, key: string) => void };
+    };
+
+    it("re-publishes the scope when the exclusion list preference changes", () => {
         account.start();
+        const listener = vi.fn();
+        account.subscribe(listener);
+        listener.mockClear();
         setPref("localExcludedLibraries", JSON.stringify([{ type: "user" }]));
-        account.subscribe(vi.fn());
-        (account as any).publish();
+        prefObserver().observe(null, "nsPref:changed", EXCLUSIONS_PREF);
+        expect(beaver.searchableLibraryIds).toEqual([2]);
+        expect(listener).toHaveBeenCalledTimes(1);
+
+        setPref("localExcludedLibraries", "[]");
+        prefObserver().observe(null, "nsPref:changed", EXCLUSIONS_PREF);
         expect(beaver.searchableLibraryIds).toEqual([1, 2]);
+    });
+
+    it("fails closed when the exclusion list preference changes to an invalid value", () => {
+        account.start();
+        setPref("localExcludedLibraries", "{not json");
+        prefObserver().observe(null, "nsPref:changed", EXCLUSIONS_PREF);
+        expect(beaver.searchableLibraryIds).toEqual([]);
+        expect(beaver.libraryScopeInitialized).toBe(true);
+        expect(Zotero.logError).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops observing the exclusion list on dispose", async () => {
+        account.start();
+        const observer = prefObserver();
+        await account.dispose();
+        expect(Services.prefs.removeObserver).toHaveBeenCalledWith(EXCLUSIONS_PREF, observer);
+        setPref("localExcludedLibraries", JSON.stringify([{ type: "user" }]));
+        observer.observe(null, "nsPref:changed", EXCLUSIONS_PREF);
+        expect(beaver.searchableLibraryIds).toEqual([]);
+        expect(beaver.libraryScopeInitialized).toBe(false);
     });
 
     it("never contacts the backend from refresh, thread claiming or auth reads", async () => {
