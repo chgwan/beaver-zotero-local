@@ -5,6 +5,7 @@ import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
 import { localModeEnabledAtom } from './localMode';
+import { localWebSearchStatusAtom } from './localAgentConfig';
 import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 
 const isSidebarVisibleBaseAtom = atom(false);
@@ -110,11 +111,15 @@ export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpWriteToolsEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
 export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
-// Web search is a hosted (Beaver-credits or Plus Tools) capability. Local mode
-// has neither, and `requestPlusToolsAtom`'s initial value is a stale pref read
-// that can still be true from before local mode was enabled.
+// In cloud mode, web search is a hosted (Beaver-credits or Plus Tools)
+// capability. In local mode it is the model provider's own hosted search,
+// allowed when the local web search preference is on and the selected provider
+// offers one; `requestPlusToolsAtom` is ignored there, since its initial value
+// is a stale pref read that can still be true from before local mode.
 export const isWebSearchAllowedAtom = atom((get) =>
-    !get(localModeEnabledAtom) && Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
+    get(localModeEnabledAtom)
+        ? get(localWebSearchStatusAtom).available
+        : Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);
 
 /**
