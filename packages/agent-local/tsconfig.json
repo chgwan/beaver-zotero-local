@@ -38,6 +38,8 @@
     "./src/llm/toolCallAccumulator.ts",
     "./src/llm/types.ts",
     "./src/llm/openAiClient.ts",
+    "./src/llm/anthropicClient.ts",
+    "./src/llm/clientForFormat.ts",
     "./src/run/frameEmitter.ts",
     "./src/index.ts"
   ]
