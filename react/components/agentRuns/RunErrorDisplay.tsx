@@ -33,6 +33,33 @@ interface RunErrorDisplayProps {
 }
 
 /**
+ * Whether the hosted-fallback actions may show for this error. Local mode has
+ * no Beaver account or credits to fall back to, so both are always hidden
+ * there regardless of what the local run reported.
+ */
+export function runErrorActionVisibility({
+    hasBeaverFallback,
+    errorType,
+    hasCredits,
+    isLastRun,
+    hasDefaultBeaverModel,
+    localMode,
+}: {
+    hasBeaverFallback: boolean;
+    errorType: string;
+    hasCredits: boolean;
+    isLastRun: boolean;
+    hasDefaultBeaverModel: boolean;
+    localMode: boolean;
+}): { canTryWithBeaver: boolean; canGetBeaverCredits: boolean } {
+    if (localMode) return { canTryWithBeaver: false, canGetBeaverCredits: false };
+    return {
+        canTryWithBeaver: Boolean(hasBeaverFallback && hasCredits && isLastRun && hasDefaultBeaverModel && errorType !== "usage_limit_exceeded"),
+        canGetBeaverCredits: Boolean((hasBeaverFallback || errorType === "usage_limit_exceeded") && !hasCredits),
+    };
+}
+
+/**
  * Displays an error message for a failed agent run.
  * Shows a collapsible error message with retry and resume buttons.
  */
@@ -55,12 +82,13 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     const contentRef = useRef<HTMLDivElement | null>(null);
 
-    // Trigger profile refresh when this error has the credit button so credit state is fresh
+    // Trigger profile refresh when this error has the credit button so credit state is fresh.
+    // Local mode has no profile to refresh.
     useEffect(() => {
-        if (error.has_beaver_fallback) {
+        if (error.has_beaver_fallback && !localMode) {
             setErrorCreditCheck(true);
         }
-    }, [error.has_beaver_fallback, setErrorCreditCheck]);
+    }, [error.has_beaver_fallback, localMode, setErrorCreditCheck]);
 
     const { 
         isMenuOpen: isSelectionMenuOpen, 
@@ -102,8 +130,14 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     // Generic header title
     const headerTitle = getRunErrorTitle(error.type);
-    const canTryWithBeaver = Boolean(error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded");
-    const canGetBeaverCredits = Boolean((error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits);
+    const { canTryWithBeaver, canGetBeaverCredits } = runErrorActionVisibility({
+        hasBeaverFallback: Boolean(error.has_beaver_fallback),
+        errorType: error.type,
+        hasCredits,
+        isLastRun,
+        hasDefaultBeaverModel: Boolean(defaultBeaverModel),
+        localMode,
+    });
     // Resuming continues a run on the server; local mode has none to continue.
     const canResume = Boolean(error.is_resumable && isLastRun && !localMode);
     const canRetry = isLastRun;
