@@ -14,6 +14,16 @@
  * after sealing is refused. `finish()` and `fail()` own the run's closing
  * sequence for the same reason — each fires exactly once, and an error already
  * reported must not be followed by a normal completion.
+ *
+ * Delivery is serial. Renderer callbacks may be async (a tool return loads
+ * item data before it updates the run), so every frame is queued and each
+ * callback's result is awaited before the next frame is delivered — the same
+ * contract the hosted transport gives them. Emitting methods stay synchronous
+ * so streaming stays cheap: a part frame still waiting in the queue is
+ * replaced in place by a newer frame for the same coordinate, so a flood of
+ * text deltas never grows the queue past one pending frame per coordinate.
+ * Callers await `flush()` where ordering against their own work matters, and
+ * `finish()` / `fail()` resolve only once every earlier frame has settled.
  */
 
 import type {
@@ -23,7 +33,11 @@ import type {
     ToolReturnPart,
     RunUsage,
 } from '@beaver/agent-core/agents/types';
-import type { WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
+import type {
+    WSCallbacks,
+    WSPartEvent,
+    WSWarningEvent,
+} from '@beaver/agent-core/protocol/agentProtocol';
 
 export interface FrameEmitterOptions {
     runId: string;
@@ -64,6 +78,17 @@ export interface FrameEmitterFailure {
     is_retryable?: boolean;
 }
 
+/** A frame waiting for delivery. */
+interface QueuedFrame {
+    /** Set for part frames, which a newer frame at the same coordinate replaces. */
+    coordinate?: string;
+    deliver: () => unknown;
+}
+
+const log = (message: string): void => {
+    if (typeof console !== 'undefined') console.log(`Beaver: ${message}`);
+};
+
 export class FrameEmitter {
     private readonly runId: string;
     private readonly callbacks: WSCallbacks;
@@ -72,9 +97,68 @@ export class FrameEmitter {
     /** Set by `finish()` or `fail()`. Both become a no-op once either has run. */
     private finished = false;
 
+    private readonly queue: QueuedFrame[] = [];
+    /** Part frames still in `queue`, by coordinate, so a newer one can replace them. */
+    private readonly queuedParts = new Map<string, QueuedFrame>();
+    /** The running drain, or null when the queue is idle. */
+    private draining: Promise<void> | null = null;
+
     constructor(options: FrameEmitterOptions) {
         this.runId = options.runId;
         this.callbacks = options.callbacks;
+    }
+
+    /** Resolves once every frame emitted so far has been delivered and settled. */
+    flush(): Promise<void> {
+        return this.draining ?? Promise.resolve();
+    }
+
+    private enqueue(frame: QueuedFrame): void {
+        this.queue.push(frame);
+        if (frame.coordinate) this.queuedParts.set(frame.coordinate, frame);
+        if (!this.draining) this.draining = this.drain();
+    }
+
+    private enqueuePart(event: WSPartEvent): void {
+        const coordinate = `${event.message_index}:${event.part_index}`;
+        const waiting = this.queuedParts.get(coordinate);
+        if (waiting) {
+            // Parts replace, so only the newest content at a coordinate matters.
+            waiting.deliver = () => this.callbacks.onPart(event);
+            return;
+        }
+        this.enqueue({ coordinate, deliver: () => this.callbacks.onPart(event) });
+    }
+
+    /**
+     * Deliver queued frames one at a time, awaiting each callback. A callback
+     * that throws or rejects is reported through `onError` as an event-handling
+     * failure and delivery continues with the next frame, as the hosted
+     * transport does.
+     */
+    private async drain(): Promise<void> {
+        while (this.queue.length > 0) {
+            const frame = this.queue.shift()!;
+            if (frame.coordinate && this.queuedParts.get(frame.coordinate) === frame) {
+                this.queuedParts.delete(frame.coordinate);
+            }
+            try {
+                await frame.deliver();
+            } catch (error) {
+                log(`a run frame callback failed: ${error}`);
+                try {
+                    this.callbacks.onError({
+                        event: 'error',
+                        type: 'event_handling_error',
+                        message: 'Failed to handle server event',
+                        details: String(error),
+                    });
+                } catch (reportError) {
+                    log(`reporting a callback failure failed: ${reportError}`);
+                }
+            }
+        }
+        this.draining = null;
     }
 
     /** Coordinates closed to further writes, as `messageIndex:partIndex`. */
@@ -94,16 +178,11 @@ export class FrameEmitter {
             part: TextPart | ThinkingPart | ToolCallPart
         ): void => {
             if (partsSealed) {
-                if (typeof console !== 'undefined') {
-                    console.log(
-                        `Beaver: refused a frame for ${responseIndex}:${partIndex}; ` +
-                            'the round already ended.'
-                    );
-                }
+                log(`refused a frame for ${responseIndex}:${partIndex}; the round already ended.`);
                 return;
             }
             touched.add(partIndex);
-            this.callbacks.onPart({
+            this.enqueuePart({
                 event: 'part',
                 run_id: this.runId,
                 message_index: responseIndex,
@@ -136,58 +215,76 @@ export class FrameEmitter {
             },
 
             toolReturn: (part) => {
-                this.callbacks.onToolReturn({
-                    event: 'tool_return',
+                const event = {
+                    event: 'tool_return' as const,
                     run_id: this.runId,
                     message_index: requestIndex,
                     part,
-                });
+                };
+                this.enqueue({ deliver: () => this.callbacks.onToolReturn(event) });
             },
         };
     }
 
     /**
-     * Emit the closing sequence for a run that finished normally: the model
-     * stopped producing tokens, the run is durable, and citations (an empty
-     * list here — local mode resolves none) are settled. A second call, and
-     * any call after `fail()`, is a no-op — a run ends exactly once, and never
-     * with both an error and a normal completion.
+     * Queue a non-fatal warning behind every frame emitted so far. Ignored
+     * once the run has ended.
      */
-    finish(usage: RunUsage | null = null): void {
+    warning(warning: Pick<WSWarningEvent, 'type' | 'message' | 'data'>): void {
         if (this.finished) return;
-        this.finished = true;
-        this.callbacks.onStreamingDone?.({ event: 'streaming_done', run_id: this.runId });
-        this.callbacks.onRunComplete({
-            event: 'run_complete',
-            run_id: this.runId,
-            usage,
-            cost: null,
-            citations: null,
-            agent_actions: null,
-        });
-        this.callbacks.onRunCitations?.({
-            event: 'run_citations',
-            run_id: this.runId,
-            citations: [],
-        });
-        this.callbacks.onDone();
+        const event: WSWarningEvent = { event: 'warning', run_id: this.runId, ...warning };
+        this.enqueue({ deliver: () => this.callbacks.onWarning(event) });
     }
 
     /**
-     * End the run in error. Emits `onError` and marks the run finished so a
-     * later `finish()` call — from a loop's cleanup path, say — never sends
-     * `done` after the error already ended it. A second call is a no-op.
+     * Close a run that finished normally: the model stopped producing tokens,
+     * the run is durable, and citations (an empty list here — local mode
+     * resolves none) are settled. The frames queue behind every earlier frame,
+     * and the returned promise resolves once they have all been delivered. A
+     * second call, and any call after `fail()`, is a no-op — a run ends exactly
+     * once, and never with both an error and a normal completion.
      */
-    fail(error: FrameEmitterFailure): void {
-        if (this.finished) return;
+    finish(usage: RunUsage | null = null): Promise<void> {
+        if (this.finished) return this.flush();
         this.finished = true;
-        this.callbacks.onError({
-            event: 'error',
+        const runId = this.runId;
+        this.enqueue({ deliver: () => this.callbacks.onStreamingDone?.({ event: 'streaming_done', run_id: runId }) });
+        this.enqueue({
+            deliver: () =>
+                this.callbacks.onRunComplete({
+                    event: 'run_complete',
+                    run_id: runId,
+                    usage,
+                    cost: null,
+                    citations: null,
+                    agent_actions: null,
+                }),
+        });
+        this.enqueue({
+            deliver: () => this.callbacks.onRunCitations?.({ event: 'run_citations', run_id: runId, citations: [] }),
+        });
+        this.enqueue({ deliver: () => this.callbacks.onDone() });
+        return this.flush();
+    }
+
+    /**
+     * End the run in error. The error queues behind every earlier frame, and
+     * the returned promise resolves once it has been delivered. Marks the run
+     * finished, so a later `finish()` — from a loop's cleanup path, say — never
+     * sends `done` after the error already ended it. A second call is a no-op.
+     */
+    fail(error: FrameEmitterFailure): Promise<void> {
+        if (this.finished) return this.flush();
+        this.finished = true;
+        const event = {
+            event: 'error' as const,
             run_id: this.runId,
             type: error.type,
             message: error.message,
             details: error.details,
             is_retryable: error.is_retryable,
-        });
+        };
+        this.enqueue({ deliver: () => this.callbacks.onError(event) });
+        return this.flush();
     }
 }

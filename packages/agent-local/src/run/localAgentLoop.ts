@@ -198,7 +198,8 @@ async function runToolCall(call: AccumulatedToolCall, catalog: LocalToolCatalog,
 
 /**
  * Run one local agent turn to completion, cancellation, or failure. Resolves
- * in every case; outcomes are reported through `options.callbacks`.
+ * in every case, once every frame it emitted has been delivered and its
+ * callback settled; outcomes are reported through `options.callbacks`.
  */
 export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise<void> {
     const { runId, config, catalog, callbacks, signal } = options;
@@ -229,9 +230,12 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
             usage.addRequest(turn.usage);
 
             if (turn.toolCalls.length === 0) {
-                emitter.finish(usage.toRunUsage());
+                await emitter.finish(usage.toRunUsage());
                 return;
             }
+
+            // The renderer must hold each tool call before its return arrives.
+            await emitter.flush();
 
             transcript.push({ role: 'assistant', content: turn.text, toolCalls: turn.toolCalls });
 
@@ -239,7 +243,10 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
                 const result = await runToolCall(call, catalog, signal);
                 // Cancelled while the tool ran: the run is over, and its frames
                 // must not land on a run the UI has already stopped.
-                if (signal.aborted) return;
+                if (signal.aborted) {
+                    await emitter.flush();
+                    return;
+                }
                 if (result.outcome === 'success') usage.addSuccessfulToolCall();
 
                 frames.toolReturn({
@@ -252,24 +259,27 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
                 });
                 transcript.push({ role: 'tool', content: result.transcriptText, toolCallId: call.id });
             }
+            await emitter.flush();
         }
 
         // Out of rounds with the model still calling tools. Stop cleanly: what
         // it has written so far is more useful than an error.
-        callbacks.onWarning({
-            event: 'warning',
-            run_id: runId,
+        emitter.warning({
             type: 'local_round_cap',
             message:
                 `Stopped after ${config.maxRounds} rounds of tool calls without a final answer. ` +
                 'Send a follow-up to continue, or narrow the question.',
         });
-        emitter.finish(usage.toRunUsage());
+        await emitter.finish(usage.toRunUsage());
     } catch (error) {
         const cancelled = (error instanceof LlmRequestError && error.kind === 'cancelled') || signal.aborted;
-        if (cancelled) return;
+        if (cancelled) {
+            // Frames emitted before the stop still reach the renderer, in order.
+            await emitter.flush();
+            return;
+        }
 
-        emitter.fail({
+        await emitter.fail({
             type: error instanceof LlmRequestError ? 'local_provider_error' : 'local_agent_error',
             message: describeError(error),
             details: error instanceof LlmRequestError ? error.kind : undefined,
