@@ -58,6 +58,12 @@ export type { RunHistoryOptions } from './run/runHistory';
 export { buildSystemPrompt } from './run/systemPrompt';
 export type { SystemPromptOptions } from './run/systemPrompt';
 export { buildToolReturnMetadata } from './run/toolReturnMetadata';
+export {
+    renderUserPrompt,
+    scopePromptToLibraries,
+    PROMPT_EXCERPT_MAX_CHARS,
+    PROMPT_SELECTION_MAX_ITEMS,
+} from './run/userPrompt';
 export type {
     ToolReturnMetadata,
     ItemSearchSummary,

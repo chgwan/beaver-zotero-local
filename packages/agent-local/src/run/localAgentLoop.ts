@@ -30,6 +30,7 @@ import type { LocalToolCatalog } from '../tools/toolCatalog';
 import { FrameEmitter, type RoundFrames } from './frameEmitter';
 import { buildSystemPrompt } from './systemPrompt';
 import { buildToolReturnMetadata } from './toolReturnMetadata';
+import { renderUserPrompt } from './userPrompt';
 
 export interface LocalAgentLoopOptions {
     runId: string;
@@ -38,9 +39,10 @@ export interface LocalAgentLoopOptions {
     /** Mints the id announced via `onThread` when `threadId` is null. */
     newThreadId: () => string;
     /**
-     * The user's message. `content` becomes the user turn and
-     * `custom_instructions` is appended to the system prompt. Attachments,
-     * application state, and filters are not used by local mode yet.
+     * The user's message, already scoped to the searchable libraries (see
+     * `scopePromptToLibraries`). It is rendered into the user turn by
+     * `renderUserPrompt`; `custom_instructions` is appended to the system
+     * prompt.
      */
     userPrompt: BeaverAgentPrompt;
     /** Earlier turns of the same thread, oldest first. */
@@ -215,7 +217,7 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
     const transcript: LlmMessage[] = [
         { role: 'system', content: systemPrompt },
         ...(options.history ?? []),
-        { role: 'user', content: options.userPrompt.content },
+        { role: 'user', content: renderUserPrompt(options.userPrompt) },
     ];
 
     callbacks.onReady(LOCAL_READY_DATA);

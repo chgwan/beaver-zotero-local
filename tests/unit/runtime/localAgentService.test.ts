@@ -248,6 +248,52 @@ describe('LocalAgentService.connect', () => {
         service.close(1000, 'test', { notifyClose: false });
     });
 
+    it('passes the loop a prompt scoped to the searchable libraries, history included', async () => {
+        pendingLoop();
+        getSearchableLibraryIdsMock.mockReturnValue([1]);
+        store.set(threadRunsAtom, [
+            {
+                id: 'old',
+                thread_id: 'thread-1',
+                user_prompt: {
+                    content: 'earlier question',
+                    attachments: [
+                        { type: 'item', library_id: 1, zotero_key: 'ITEMKEY1' },
+                        { type: 'item', library_id: 2, zotero_key: 'OLDSECRT' },
+                    ],
+                },
+                model_messages: [],
+            } as unknown as AgentRun,
+        ]);
+        const service = new LocalAgentService();
+
+        await service.connect(
+            request({
+                user_prompt: {
+                    content: 'compare',
+                    attachments: [
+                        { type: 'item', library_id: 1, zotero_key: 'ITEMKEY2' },
+                        { type: 'item', library_id: 2, zotero_key: 'NEWSECRT' },
+                    ],
+                    application_state: {
+                        current_view: 'file_reader',
+                        reader_state: { library_id: 2, zotero_key: 'READSECR', current_page: 1 },
+                    },
+                    filters: { libraries: [{ library_id: 2 }] },
+                } as any,
+            }),
+            callbacks(),
+        );
+
+        const options = runLoopMock.mock.calls[0][0];
+        expect(options.userPrompt.attachments).toEqual([{ type: 'item', library_id: 1, zotero_key: 'ITEMKEY2' }]);
+        expect(JSON.stringify(options.userPrompt)).not.toMatch(/SECR/);
+        expect(options.userPrompt.filters).toBeUndefined();
+        expect(options.history[0].content).toContain('1-ITEMKEY1');
+        expect(JSON.stringify(options.history)).not.toMatch(/SECR/);
+        service.close(1000, 'test', { notifyClose: false });
+    });
+
     it('starts a new thread with no history', async () => {
         pendingLoop();
         store.set(threadRunsAtom, [

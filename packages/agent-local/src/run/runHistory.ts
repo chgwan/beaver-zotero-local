@@ -1,7 +1,8 @@
 /**
  * Earlier runs of a thread, replayed to the model as conversation history.
  *
- * Each run contributes its user message, the assistant's text, and every tool
+ * Each run contributes its user message (rendered with its attached context,
+ * scoped to the searchable libraries), the assistant's text, and every tool
  * call that has a matching tool return, with the return right after the call
  * that asked for it. Reasoning is not replayed. A call without a return (the
  * run was stopped while the tool ran) and a return without a call are both
@@ -10,6 +11,7 @@
 
 import type { AgentRun, ToolCallPart, ToolReturnPart } from '@beaver/agent-core/agents/types';
 import type { LlmMessage } from '../llm/types';
+import { renderUserPrompt, scopePromptToLibraries } from './userPrompt';
 
 export interface RunHistoryOptions {
     /**
@@ -19,6 +21,12 @@ export interface RunHistoryOptions {
      * the reply.
      */
     contextWindow?: number | null;
+    /**
+     * Whether a library is inside the searchable scope. Earlier prompts keep
+     * only the attached context from libraries it accepts; when absent, none
+     * is kept.
+     */
+    isLibrarySearchable?: (libraryId: number) => boolean;
 }
 
 /** The share of the context window history may use. */
@@ -70,9 +78,9 @@ function toolReturnText(part: ToolReturnPart): string {
 }
 
 /** One run's messages, or an empty list when the run has no user message. */
-function runMessages(run: AgentRun): LlmMessage[] {
-    const prompt = run.user_prompt?.content ?? '';
-    if (prompt.trim().length === 0) return [];
+function runMessages(run: AgentRun, isLibrarySearchable: (libraryId: number) => boolean): LlmMessage[] {
+    if (!run.user_prompt || (run.user_prompt.content ?? '').trim().length === 0) return [];
+    const prompt = renderUserPrompt(scopePromptToLibraries(run.user_prompt, isLibrarySearchable));
 
     const returns = new Map<string, ToolReturnPart>();
     for (const message of run.model_messages ?? []) {
@@ -131,7 +139,7 @@ export function buildRunHistory(
     if (threadId === null) return [];
     const groups = runs
         .filter((run) => run.thread_id === threadId)
-        .map(runMessages)
+        .map((run) => runMessages(run, options.isLibrarySearchable ?? (() => false)))
         .filter((group) => group.length > 0);
 
     const contextWindow = options.contextWindow;
