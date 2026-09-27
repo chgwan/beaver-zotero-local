@@ -37,10 +37,13 @@ import { clientForFormat } from '@beaver/agent-local/llm/clientForFormat';
 import { runLocalAgentLoop } from '@beaver/agent-local/run/localAgentLoop';
 import { buildRunHistory } from '@beaver/agent-local/run/runHistory';
 import { scopePromptToLibraries } from '@beaver/agent-local/run/userPrompt';
-import { buildToolCatalog } from '@beaver/agent-local/tools/toolCatalog';
+import { createOpenAlexSource } from '@beaver/agent-local/search/openAlex';
+import { createScholarlySearchTool } from '@beaver/agent-local/search/scholarlySearchTool';
+import { createSemanticScholarSource } from '@beaver/agent-local/search/semanticScholar';
+import { buildToolCatalog, type NativeTool } from '@beaver/agent-local/tools/toolCatalog';
 import { getSearchableLibraryIds } from '../../src/services/agentDataProvider/utils';
 import { readAttachmentEntry } from '../../src/services/agentDataProvider/handleReadAttachmentRequest';
-import { localAgentConfigInputAtom } from '../atoms/localAgentConfig';
+import { localAgentConfigInputAtom, localSearchConfigAtom, type LocalSearchConfig } from '../atoms/localAgentConfig';
 import { isLocalMode } from '../atoms/localMode';
 import { store } from '../store';
 
@@ -54,6 +57,25 @@ const describeError = (error: unknown): string => (error instanceof Error ? erro
 
 function localError(runId: string, type: string, message: string): WSErrorEvent {
     return { event: 'error', type, message, run_id: runId, is_retryable: false };
+}
+
+/** An API key option for a search source: omitted when the key is blank. */
+const keyOption = (key: string): { apiKey?: string } => (key.trim() ? { apiKey: key.trim() } : {});
+
+/**
+ * The tools this package implements itself, per the search preferences. Each
+ * API key goes only to its own service.
+ */
+function buildNativeTools(search: LocalSearchConfig): NativeTool[] {
+    if (!search.scholarlySearch) return [];
+    return [
+        createScholarlySearchTool({
+            sources: [
+                createOpenAlexSource(keyOption(search.openAlexApiKey)),
+                createSemanticScholarSource(keyOption(search.semanticScholarApiKey)),
+            ],
+        }),
+    ];
 }
 
 export class LocalAgentService {
@@ -105,6 +127,7 @@ export class LocalAgentService {
                 },
                 searchableLibraryIds,
                 contextWindow: config.model.context_window,
+                nativeTools: buildNativeTools(store.get(localSearchConfigAtom)),
             });
             history = buildRunHistory(store.get(threadRunsAtom), request.thread_id ?? null, {
                 contextWindow: config.model.context_window,

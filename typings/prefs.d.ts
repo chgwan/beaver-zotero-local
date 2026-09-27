@@ -100,6 +100,9 @@ declare namespace _ZoteroTypes {
       "localMode": boolean;
       "localMaxRounds": number;
       "localExcludedLibraries": string;
+      "localScholarlySearch": boolean;
+      "openAlexApiKey": string;
+      "semanticScholarApiKey": string;
     };
   }
 }

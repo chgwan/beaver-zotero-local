@@ -10,7 +10,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 vi.mock('../../../react/utils/popupMessageUtils', () => ({ addPopupMessageAtom: {} }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { localAgentConfigInputAtom, localModeStatusAtom } from '../../../react/atoms/localAgentConfig';
+import { localAgentConfigInputAtom, localModeStatusAtom, localSearchConfigAtom } from '../../../react/atoms/localAgentConfig';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { preferencesRevisionAtom } from '../../../react/atoms/preferences';
 
@@ -51,5 +51,35 @@ describe('localAgentConfigInputAtom', () => {
         prefs.set('localMaxRounds', 7);
         store.set(preferencesRevisionAtom, 1);
         expect(store.get(localAgentConfigInputAtom).maxRounds).toBe(7);
+    });
+});
+
+describe('localSearchConfigAtom', () => {
+    beforeEach(() => {
+        prefs.clear();
+    });
+
+    it('enables scholarly search unless the preference turns it off', () => {
+        const store = createStore();
+        expect(store.get(localSearchConfigAtom)).toEqual({
+            scholarlySearch: true,
+            openAlexApiKey: '',
+            semanticScholarApiKey: '',
+        });
+
+        prefs.set('localScholarlySearch', false);
+        store.set(preferencesRevisionAtom, 1);
+        expect(store.get(localSearchConfigAtom).scholarlySearch).toBe(false);
+    });
+
+    it('reads the search API keys and follows preference changes', () => {
+        const store = createStore();
+        prefs.set('openAlexApiKey', 'oa');
+        prefs.set('semanticScholarApiKey', 's2');
+        expect(store.get(localSearchConfigAtom)).toMatchObject({ openAlexApiKey: 'oa', semanticScholarApiKey: 's2' });
+
+        prefs.set('openAlexApiKey', 'oa-2');
+        store.set(preferencesRevisionAtom, 1);
+        expect(store.get(localSearchConfigAtom).openAlexApiKey).toBe('oa-2');
     });
 });

@@ -9,16 +9,25 @@ const {
     resolveProviderMock,
     buildToolCatalogMock,
     cloudService,
+    openAlexMock,
+    semanticScholarMock,
+    scholarlyToolMock,
 } = vi.hoisted(() => ({
     runLoopMock: vi.fn(),
     getSearchableLibraryIdsMock: vi.fn(() => [1, 2]),
     resolveProviderMock: vi.fn(() => ({ provider: true })),
     buildToolCatalogMock: vi.fn((options: unknown) => ({ catalog: options })),
     cloudService: { connect: vi.fn(), close: vi.fn(), cancel: vi.fn(), isConnected: vi.fn() },
+    openAlexMock: vi.fn((options: unknown) => ({ openAlex: options })),
+    semanticScholarMock: vi.fn((options: unknown) => ({ semanticScholar: options })),
+    scholarlyToolMock: vi.fn((options: unknown) => ({ scholarlyTool: options })),
 }));
 
 vi.mock('@beaver/agent-local/run/localAgentLoop', () => ({ runLocalAgentLoop: runLoopMock }));
 vi.mock('@beaver/agent-local/tools/toolCatalog', () => ({ buildToolCatalog: buildToolCatalogMock }));
+vi.mock('@beaver/agent-local/search/openAlex', () => ({ createOpenAlexSource: openAlexMock }));
+vi.mock('@beaver/agent-local/search/semanticScholar', () => ({ createSemanticScholarSource: semanticScholarMock }));
+vi.mock('@beaver/agent-local/search/scholarlySearchTool', () => ({ createScholarlySearchTool: scholarlyToolMock }));
 vi.mock('@beaver/agent-core/transport/agentDataDispatch', () => ({
     resolveDefaultAgentDataProvider: resolveProviderMock,
 }));
@@ -32,13 +41,16 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({ agentService: clou
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../react/atoms/localAgentConfig', async () => {
     const { atom } = await vi.importActual<typeof import('jotai')>('jotai');
-    return { localAgentConfigInputAtom: atom<any>({ model: null, maxRounds: null }) };
+    return {
+        localAgentConfigInputAtom: atom<any>({ model: null, maxRounds: null }),
+        localSearchConfigAtom: atom<any>({ scholarlySearch: false, openAlexApiKey: '', semanticScholarApiKey: '' }),
+    };
 });
 
 import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
-import { localAgentConfigInputAtom } from '../../../react/atoms/localAgentConfig';
+import { localAgentConfigInputAtom, localSearchConfigAtom } from '../../../react/atoms/localAgentConfig';
 import { store } from '../../../react/store';
 import {
     activeAgentService,
@@ -102,6 +114,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     (globalThis as any).Zotero.Beaver = { localMode: true };
     store.set(localAgentConfigInputAtom, { model: MODEL, maxRounds: null });
+    store.set(localSearchConfigAtom as any, { scholarlySearch: false, openAlexApiKey: '', semanticScholarApiKey: '' });
     store.set(threadRunsAtom, []);
     getSearchableLibraryIdsMock.mockReturnValue([1, 2]);
 });
@@ -119,6 +132,7 @@ describe('LocalAgentService.connect', () => {
             provider: { provider: true, read_attachment_request: { readAttachment: true } },
             searchableLibraryIds: [1, 2],
             contextWindow: 1000,
+            nativeTools: [],
         });
         expect(runLoopMock).toHaveBeenCalledTimes(1);
         const options = runLoopMock.mock.calls[0][0];
@@ -129,6 +143,58 @@ describe('LocalAgentService.connect', () => {
         expect(typeof options.newThreadId()).toBe('string');
         expect(cb.onOpen).toHaveBeenCalledTimes(1);
         expect(cb.onReady).toHaveBeenCalledTimes(1);
+        service.close(1000, 'test', { notifyClose: false });
+    });
+
+    it('offers scholarly search only when it is enabled, each key going to its own source', async () => {
+        pendingLoop();
+        store.set(localSearchConfigAtom as any, {
+            scholarlySearch: true,
+            openAlexApiKey: ' oa-key ',
+            semanticScholarApiKey: 's2-key',
+        });
+        const service = new LocalAgentService();
+
+        await service.connect(request(), callbacks());
+
+        expect(openAlexMock).toHaveBeenCalledWith({ apiKey: 'oa-key' });
+        expect(semanticScholarMock).toHaveBeenCalledWith({ apiKey: 's2-key' });
+        expect(scholarlyToolMock).toHaveBeenCalledWith({
+            sources: [{ openAlex: { apiKey: 'oa-key' } }, { semanticScholar: { apiKey: 's2-key' } }],
+        });
+        expect(buildToolCatalogMock.mock.calls[0][0]).toMatchObject({
+            nativeTools: [{ scholarlyTool: expect.anything() }],
+        });
+        service.close(1000, 'test', { notifyClose: false });
+    });
+
+    it('passes no key to a source whose key is blank', async () => {
+        pendingLoop();
+        store.set(localSearchConfigAtom as any, { scholarlySearch: true, openAlexApiKey: '  ', semanticScholarApiKey: '' });
+        const service = new LocalAgentService();
+
+        await service.connect(request(), callbacks());
+
+        expect(openAlexMock).toHaveBeenCalledWith({});
+        expect(semanticScholarMock).toHaveBeenCalledWith({});
+        service.close(1000, 'test', { notifyClose: false });
+    });
+
+    it('builds no search source when scholarly search is off', async () => {
+        pendingLoop();
+        store.set(localSearchConfigAtom as any, {
+            scholarlySearch: false,
+            openAlexApiKey: 'oa-key',
+            semanticScholarApiKey: 's2-key',
+        });
+        const service = new LocalAgentService();
+
+        await service.connect(request(), callbacks());
+
+        expect(openAlexMock).not.toHaveBeenCalled();
+        expect(semanticScholarMock).not.toHaveBeenCalled();
+        expect(scholarlyToolMock).not.toHaveBeenCalled();
+        expect(buildToolCatalogMock.mock.calls[0][0]).toMatchObject({ nativeTools: [] });
         service.close(1000, 'test', { notifyClose: false });
     });
 

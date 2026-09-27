@@ -32,3 +32,24 @@ export const localAgentConfigInputAtom = atom<LocalAgentConfigInput>((get) => {
 export const localModeStatusAtom = atom<LocalConfigResult>((get) =>
     resolveLocalAgentConfig(get(localAgentConfigInputAtom))
 );
+
+/** Search settings for a local run. */
+export interface LocalSearchConfig {
+    /** Offer `scholarly_search` (OpenAlex + Semantic Scholar). */
+    scholarlySearch: boolean;
+    openAlexApiKey: string;
+    semanticScholarApiKey: string;
+}
+
+/**
+ * The search preferences, re-read whenever preferences change. A run reads
+ * them when it starts, so a change applies from the next run.
+ */
+export const localSearchConfigAtom = atom<LocalSearchConfig>((get) => {
+    get(preferencesRevisionAtom);
+    return {
+        scholarlySearch: getPref('localScholarlySearch') !== false,
+        openAlexApiKey: String(getPref('openAlexApiKey') ?? ''),
+        semanticScholarApiKey: String(getPref('semanticScholarApiKey') ?? ''),
+    };
+});
