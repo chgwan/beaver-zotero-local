@@ -22,6 +22,8 @@ import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAto
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
+import { localModeEnabledAtom } from './localMode';
+import { localWebSearchStatusAtom } from './localAgentConfig';
 import { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID, resolveObjectId } from '../../src/utils/libraryIdentity';
@@ -371,6 +373,53 @@ function buildEmptyLibraryDiscoverPrompt(interest: string): string {
 }
 
 /**
+ * Enable web search for the empty-library discovery run, or report that it
+ * cannot proceed. The prompt explicitly requires external search, so a run
+ * without it is not worth sending.
+ *
+ * Cloud mode: returning users may have selected a BYOK/custom model after
+ * onboarding, so switch to an included Beaver model before enabling search.
+ *
+ * Local mode: there is no Beaver-hosted model to switch to —
+ * `beaverDefaultModelAtom` there is just the first custom model in the
+ * selector — so switching would silently replace the user's chosen model and
+ * stamp it `access_mode: 'app_key'`. Local mode never switches models here:
+ * the run proceeds only when the selected provider's hosted search is
+ * actually available.
+ */
+export function enableWebSearchForEmptyLibraryDiscover(get: any, set: any): boolean {
+    if (get(localModeEnabledAtom)) {
+        if (!get(localWebSearchStatusAtom).available) {
+            logger(
+                'firstRun: empty-library discovery blocked because web search is unavailable in local mode',
+                1,
+            );
+            return false;
+        }
+        set(isWebSearchEnabledAtom, true);
+        return true;
+    }
+
+    if (!get(isWebSearchAllowedAtom)) {
+        const beaverDefaultModel = get(beaverDefaultModelAtom);
+        if (!beaverDefaultModel) {
+            logger(
+                'firstRun: empty-library discovery blocked because web search is unavailable',
+                1,
+            );
+            return false;
+        }
+        set(updateSelectedModelAtom, {
+            ...beaverDefaultModel,
+            access_mode: 'app_key',
+        });
+    }
+
+    set(isWebSearchEnabledAtom, true);
+    return true;
+}
+
+/**
  * Empty-library discovery submission. Mirrors `submitFirstRunCardAtom` but
  * sources the prompt from the user's research-interest textarea, enables
  * web search for the run, and tags the origin as a `discover_research` card
@@ -388,26 +437,7 @@ export const submitEmptyLibraryDiscoverAtom = atom(
         try {
             const isSuggestionsMode = get(firstRunSuggestionsModeAtom);
 
-            // The empty-library discovery prompt explicitly requires external
-            // search. Returning users may have selected a BYOK/custom model
-            // after onboarding, so switch to an included Beaver model before
-            // stamping completion or starting the run.
-            if (!get(isWebSearchAllowedAtom)) {
-                const beaverDefaultModel = get(beaverDefaultModelAtom);
-                if (!beaverDefaultModel) {
-                    logger(
-                        'firstRun: empty-library discovery blocked because web search is unavailable',
-                        1,
-                    );
-                    return;
-                }
-                set(updateSelectedModelAtom, {
-                    ...beaverDefaultModel,
-                    access_mode: 'app_key',
-                });
-            }
-
-            set(isWebSearchEnabledAtom, true);
+            if (!enableWebSearchForEmptyLibraryDiscover(get, set)) return;
 
             if (!isSuggestionsMode) {
                 await set(markFirstRunCompleteAtom, 'empty_library_discover');
