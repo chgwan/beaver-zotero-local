@@ -59,7 +59,7 @@ import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
 } from '../../atoms/messageComposition';
-import { userIdAtom, isAuthenticatedAtom, runUserIdAtom } from '../../atoms/auth';
+import { isAuthenticatedAtom, runUserIdAtom } from '../../atoms/auth';
 import { localModeEnabledAtom } from '../../atoms/localMode';
 import { type CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from '../../utils/zoteroReferences';
@@ -314,7 +314,8 @@ export async function handleTestCurrentIdsHttpRequest(_request: any) {
 /**
  * Reopen an existing thread by id (the "history re-validation" path). This is the
  * flow N8 exercises: after loading, applied actions must NOT flip to `undone`
- * merely from being viewed. `user_id` defaults to the logged-in Beaver user.
+ * merely from being viewed. `user_id` defaults to `runUserIdAtom` — the local
+ * user in local mode, otherwise the logged-in Beaver user.
  */
 export async function handleTestLoadThreadHttpRequest(request: any) {
     const threadId = request?.threadId ?? request?.thread_id;
