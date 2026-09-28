@@ -36,7 +36,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
+import { isZoteroAvailable, skipIfLocalMode, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { post } from '../helpers/zoteroHttpClient';
 import { fetchDocument, fetchPageImages, searchAttachment } from '../helpers/zoteroHttpClient';
 import {
@@ -94,8 +94,11 @@ async function exclude(libraryIds: number[]): Promise<void> {
     }
 }
 
-beforeEach((ctx) => {
+beforeEach(async (ctx) => {
     skipIfNoZotero(ctx, available);
+    // The suite drives the hosted account's excluded-libraries profile; local
+    // mode has no profile and uses the `localExcludedLibraries` pref instead.
+    await skipIfLocalMode(ctx, 'exercises the hosted account profile\'s excluded-libraries set; local mode has no profile');
     // The whole suite depends on the driver, which needs a loaded profile.
     if (!hasProfile) ctx.skip();
 });

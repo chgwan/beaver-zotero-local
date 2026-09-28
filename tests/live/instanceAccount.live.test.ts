@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { post } from "../helpers/zoteroHttpClient";
 import {
     isZoteroAvailable,
+    skipIfLocalMode,
     skipIfNoZotero,
 } from "../helpers/zoteroAvailability";
 
@@ -29,7 +30,13 @@ const projection = (windowId: string) =>
 describe.runIf(process.env.BEAVER_MULTI_WINDOW_TEST === "1")(
     "instance account projections in independent Zotero renderers",
     () => {
-        beforeEach((ctx) => skipIfNoZotero(ctx, available));
+        beforeEach(async (ctx) => {
+            skipIfNoZotero(ctx, available);
+            await skipIfLocalMode(
+                ctx,
+                "asserts a hosted account projection (authenticated, profileLoaded) and mutates the account's excluded-libraries set; local mode has neither",
+            );
+        });
         it("hydrates the same current identity, revision and scope in both bundles", async () => {
             const targets = await windows();
             expect(targets.length).toBeGreaterThanOrEqual(2);

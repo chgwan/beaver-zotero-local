@@ -15,6 +15,7 @@ export async function handleTestPingHttpRequest(_request: any) {
         ok: true,
         cache_available: !!cache,
         db_available: !!db,
+        localMode: Zotero.Beaver?.localMode === true,
     };
 }
 

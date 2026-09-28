@@ -1,6 +1,6 @@
 /** Exercise the actual JSON-RPC endpoint with the MCP server and write tools enabled. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
+import { isZoteroAvailable, skipIfLocalMode, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { SMALL_PDF, NON_PDF } from '../helpers/fixtures';
 import { post } from '../helpers/zoteroHttpClient';
 import { getExcludedLibraries, setExcludedLibraries, restoreExcludedLibraries } from '../helpers/cacheInspector';
@@ -97,6 +97,12 @@ describe('MCP library and annotation tools', () => {
 
 
 describe('MCP excluded-library boundary', () => {
+    // Sets exclusions via the hosted account profile; local mode has no profile
+    // (it excludes libraries through the `localExcludedLibraries` pref instead).
+    beforeEach(async (ctx) => {
+        await skipIfLocalMode(ctx, 'sets exclusions via the hosted account profile, which local mode has none of');
+    });
+
     it('hides excluded libraries and rejects annotation reads and both writes', async () => {
         const original = await getExcludedLibraries();
         try {
