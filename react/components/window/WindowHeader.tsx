@@ -53,11 +53,20 @@ const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat, navForceCollapsed
                         <Tooltip content={toggleLabel} showArrow singleLine>
                             <IconButton
                                 icon={SidebarLeftIcon}
-                                onClick={() => toggleNav()}
+                                onClick={() => {
+                                    // A native `disabled` button stops firing hover/mouse
+                                    // events in Gecko, which would hide the "widen the
+                                    // window" tooltip exactly when it's needed. Stay
+                                    // enabled and no-op instead, so the tooltip still
+                                    // shows and a click can never flip the saved
+                                    // preference to a state with no visible effect.
+                                    if (navForceCollapsed) return;
+                                    toggleNav();
+                                }}
                                 className="scale-14"
                                 ariaLabel={toggleLabel}
                                 ariaPressed={!collapsed && !navForceCollapsed}
-                                disabled={navForceCollapsed}
+                                ariaDisabled={navForceCollapsed}
                             />
                         </Tooltip>
                         <div className="beaver-window-header-title-group">
