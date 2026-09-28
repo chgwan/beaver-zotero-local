@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { v4 as uuidv4 } from "uuid";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink, ExternalLink, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
@@ -38,7 +39,9 @@ interface CustomProviderEntry {
     model: CustomChatModel;
 }
 
-const createProviderId = (): string => crypto.randomUUID();
+// Uses `uuid` rather than the platform `crypto.randomUUID()`: the preferences
+// window is a separate realm and may not expose `crypto` at all.
+const createProviderId = (): string => uuidv4();
 
 // New providers default to OpenRouter's endpoint, the most common custom setup.
 const emptyCustomModel = (): CustomChatModel => ({
