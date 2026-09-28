@@ -5,12 +5,14 @@ import TableWindowView from './tables/TableWindowView';
 import WindowNav from './window/WindowNav';
 import WindowHeader from './window/WindowHeader';
 import { useBeaverWindowContext } from '../hooks/useBeaverWindowContext';
+import { useWindowNavAutoCollapse } from '../hooks/useWindowNavAutoCollapse';
 import { windowSurfaceAtom } from '../atoms/windowSurface';
 import { windowNavCollapsedAtom } from '../atoms/windowLayout';
 import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import { useReportBeaverUIVisibility } from '../hooks/useProfileSync';
+import { deriveEffectiveWindowNavCollapsed } from '../utils/windowNavCollapse';
 
 /**
  * WindowSidebar is rendered in the separate Beaver window.
@@ -39,6 +41,9 @@ const WindowSidebar = () => {
     const chatAccessGate = useAtomValue(chatAccessGateAtom);
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
     const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
+    // Derived from the window's own width, never persisted: a transient
+    // narrow window must not flip the user's saved nav preference.
+    const forceCollapsed = useWindowNavAutoCollapse();
 
     if (surface.kind === 'table') {
         return <TableWindowView surface={surface} />;
@@ -50,7 +55,11 @@ const WindowSidebar = () => {
     // and re-expanding on every click would be the alternative.
     const hasHistory = (chatAccessGate === null || chatAccessGate === 'loading')
         && !isFirstRunVisible && !isWhereToStartVisible;
-    const navCollapsed = collapsed || !hasHistory;
+    const navCollapsed = deriveEffectiveWindowNavCollapsed({
+        userCollapsed: collapsed,
+        forceCollapsed,
+        hasHistory,
+    });
 
     return (
         <div className={`beaver-window-app ${navCollapsed ? 'beaver-window-app-nav-collapsed' : ''}`}>
@@ -61,7 +70,7 @@ const WindowSidebar = () => {
                 <Sidebar
                     location="library"
                     isWindow={true}
-                    header={<WindowHeader showChat={hasHistory} />}
+                    header={<WindowHeader showChat={hasHistory} navForceCollapsed={forceCollapsed} />}
                 />
             </div>
         </div>

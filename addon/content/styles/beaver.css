@@ -3501,6 +3501,15 @@
     background-color: var(--beaver-surface-ground);
 }
 
+/* An unbroken long string (a pasted URL or DOI) has nowhere to break at the
+ * window's 200px floor: the shared `.markdown` rules ([id^="beaver-pane-"])
+ * do not set this, since the library and reader panes are never squeezed this
+ * narrow. Scoped to the window only, so pane rendering is unchanged. */
+#beaver-pane-window .markdown p,
+#beaver-pane-window .markdown a {
+    overflow-wrap: anywhere;
+}
+
 /* ── Header ── */
 
 #beaver-pane-window .beaver-window-header {
@@ -3544,7 +3553,11 @@
 #beaver-pane-window .beaver-window-header-trail {
     display: flex;
     align-items: center;
-    gap: 14px;
+    /* Tighter than the pane header's 14px: at the window's 200px floor the
+     * lead's ellipsized title already gives way first (min-width: 0, flex: 1),
+     * but a build with several trailing buttons (dev tools, index/database
+     * status) still benefits from the few extra pixels this saves. */
+    gap: 8px;
     flex: none;
 }
 

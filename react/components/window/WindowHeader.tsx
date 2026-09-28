@@ -16,6 +16,13 @@ interface WindowHeaderProps {
      * together, so the two cannot disagree.
      */
     showChat: boolean;
+    /**
+     * Whether the window is currently too narrow to show the nav, regardless
+     * of the user's saved preference. Disables the toggle rather than letting
+     * it flip a preference that would not visibly do anything, or open a nav
+     * that has nowhere to fit.
+     */
+    navForceCollapsed: boolean;
 }
 
 /**
@@ -23,7 +30,7 @@ interface WindowHeaderProps {
  * its actions on the left, the account on the right. The sidebar itself is
  * not part of it.
  */
-const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat }) => {
+const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat, navForceCollapsed }) => {
     const collapsed = useAtomValue(windowNavCollapsedAtom);
     const toggleNav = useSetAtom(toggleWindowNavAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
@@ -34,19 +41,23 @@ const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat }) => {
     const localMode = useAtomValue(localModeEnabledAtom);
 
     const title = threadId ? (threadName || 'Unnamed conversation') : 'New chat';
+    const toggleLabel = navForceCollapsed
+        ? 'Widen the window to show chat history'
+        : (collapsed ? 'Show sidebar' : 'Hide sidebar');
 
     return (
         <header id="beaver-window-header" className="beaver-window-header">
             <div className="beaver-window-header-lead">
                 {showChat && (
                     <>
-                        <Tooltip content={collapsed ? 'Show sidebar' : 'Hide sidebar'} showArrow singleLine>
+                        <Tooltip content={toggleLabel} showArrow singleLine>
                             <IconButton
                                 icon={SidebarLeftIcon}
                                 onClick={() => toggleNav()}
                                 className="scale-14"
-                                ariaLabel={collapsed ? 'Show sidebar' : 'Hide sidebar'}
-                                ariaPressed={!collapsed}
+                                ariaLabel={toggleLabel}
+                                ariaPressed={!collapsed && !navForceCollapsed}
+                                disabled={navForceCollapsed}
                             />
                         </Tooltip>
                         <div className="beaver-window-header-title-group">
