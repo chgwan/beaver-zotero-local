@@ -504,6 +504,23 @@ describe('createAnthropicClient', () => {
         ).rejects.toMatchObject({ kind: 'auth' });
     });
 
+    it('classifies a 404 as a not_found error', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 404,
+                statusText: 'Not Found',
+                body: null,
+                text: async () => '{"error":{"message":"model not found"}}',
+                json: async () => ({}),
+            })
+        );
+        await expect(
+            createAnthropicClient().streamTurn(turn(), handlers(), signal())
+        ).rejects.toMatchObject({ kind: 'not_found' });
+    });
+
     it('captures usage from message_start input tokens and message_delta output tokens', async () => {
         vi.stubGlobal(
             'fetch',

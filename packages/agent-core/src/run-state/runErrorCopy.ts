@@ -59,6 +59,16 @@ const RUN_ERROR_TITLE_BY_TYPE: Record<string, string> = {
     llm_auth_error_internal: 'System Error',
     llm_server_error: 'Server Error',
     llm_client_error: 'Client Error',
+
+    // Local mode
+    local_config_error: 'Model not configured',
+    local_agent_error: 'Local agent error',
+    local_provider_auth: 'API key rejected',
+    local_provider_rate_limit: 'Rate limited by provider',
+    local_provider_network: 'Provider unreachable',
+    local_provider_not_found: 'Model or endpoint not found',
+    local_provider_bad_request: 'Provider rejected the request',
+    local_provider_server: 'Provider error',
 };
 
 /** Header title for an agent-run error type, with a fallback for unknown types. */

@@ -536,7 +536,8 @@ describe('runLocalAgentLoop', () => {
         expect(callbacks.onError.mock.calls[0][0]).toMatchObject({
             event: 'error',
             run_id: 'run-1',
-            type: 'local_provider_error',
+            type: 'local_provider_auth',
+            details: 'auth',
             is_retryable: false,
         });
         expect(callbacks.onError.mock.calls[0][0].message).toContain('bad key');
@@ -544,6 +545,28 @@ describe('runLocalAgentLoop', () => {
         expect(callbacks.onDone).not.toHaveBeenCalled();
         expect(callbacks.onRunComplete).not.toHaveBeenCalled();
         expect(callbacks.onStreamingDone).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['auth', 'local_provider_auth'],
+        ['rate_limit', 'local_provider_rate_limit'],
+        ['network', 'local_provider_network'],
+        ['not_found', 'local_provider_not_found'],
+        ['bad_request', 'local_provider_bad_request'],
+        ['server', 'local_provider_server'],
+    ] as const)('maps a %s provider failure to %s', async (kind, type) => {
+        const client = {
+            streamTurn: vi.fn(async () => {
+                throw new LlmRequestError(kind, 'provider says no');
+            }),
+        };
+        await run(client, callbacks);
+        expect(callbacks.onError.mock.calls[0][0]).toMatchObject({
+            type,
+            details: kind,
+            is_retryable: false,
+        });
+        expect(callbacks.onError.mock.calls[0][0].message).toBe('provider says no');
     });
 
     it('reports a failure in a later round after earlier frames were emitted', async () => {

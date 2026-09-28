@@ -136,7 +136,8 @@ const readUsage = (response: any): LlmUsage | null => {
 const classifyStreamError = (code: unknown): LlmErrorKind => {
     const value = typeof code === 'string' ? code : '';
     if (/rate_limit|quota/i.test(value)) return 'rate_limit';
-    if (/invalid|unsupported|not_found/i.test(value)) return 'bad_request';
+    if (/not_found/i.test(value)) return 'not_found';
+    if (/invalid|unsupported/i.test(value)) return 'bad_request';
     return 'server';
 };
 

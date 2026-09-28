@@ -163,6 +163,18 @@ describe('createOpenAiClient', () => {
         ).rejects.toMatchObject({ kind: 'auth' });
     });
 
+    it('classifies a 404 as a not_found error', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                errorResponse(404, 'Not Found', '{"error":{"message":"model not found"}}')
+            )
+        );
+        await expect(
+            createOpenAiClient().streamTurn(turn(), handlers(), signal())
+        ).rejects.toMatchObject({ kind: 'not_found' });
+    });
+
     it('classifies a 429 as a rate limit and surfaces the provider message', async () => {
         vi.stubGlobal(
             'fetch',
