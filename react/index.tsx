@@ -38,6 +38,7 @@ import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
 import { currentMessageContentAtom, currentReaderAttachmentAtom, currentMessageItemsAtom, addItemToCurrentMessageItemsAtom, removeItemFromMessageAtom } from './atoms/messageComposition';
 import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { flattenRunParts, selectRunForInspection } from './runtime/runPartsInspector';
+import { threadWarningsAtom } from './atoms/warnings';
 import { isTableToolName } from '@beaver/agent-core/run-state/tableResults';
 import { selectedModelAtom, validateSelectedModelAtom } from './atoms/models';
 import { isLocalMode } from './atoms/localMode';
@@ -434,7 +435,12 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
         case 'run-parts': {
             const target = selectRunForInspection(store.get(allRunsAtom), request.runId);
             if (!target) return { error: 'run_not_found' };
-            return { runId: target.id, parts: flattenRunParts(target) };
+            return {
+                runId: target.id,
+                status: target.status,
+                parts: flattenRunParts(target),
+                warnings: store.get(threadWarningsAtom).filter(w => w.run_id === target.id).map(w => w.type),
+            };
         }
         case 'thread-send':
             return store.set(sendWSMessageAtom, request.text ?? 'Reply with OK.').then(() => ({ ok: true }));
