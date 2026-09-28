@@ -24,3 +24,14 @@ export function isLocalMode(): boolean {
 
 /** Whether this plugin instance runs in local mode. Fixed at startup. */
 export const localModeEnabledAtom = atom<boolean>(() => isLocalMode());
+
+/**
+ * Whether local mode is on because this build has no Beaver server settings,
+ * so the preference cannot switch it off.
+ */
+export function isLocalModeForced(): boolean {
+    return Zotero.Beaver?.localModeForced === true;
+}
+
+/** Whether local mode is forced by the build. Fixed at startup. */
+export const localModeForcedAtom = atom<boolean>(() => isLocalModeForced());

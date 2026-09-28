@@ -24,6 +24,7 @@ import {
     LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION,
     localWebSearchCapabilityLabel,
     localWebSearchDescription,
+    localModeToggleState,
     needsLocalModeRestart,
     parseLocalMaxRoundsInput,
     parseLocalWebSearchMaxUsesInput,
@@ -40,6 +41,28 @@ describe('needsLocalModeRestart', () => {
     it('is true when the pref has been flipped but not yet applied', () => {
         expect(needsLocalModeRestart(true, false)).toBe(true);
         expect(needsLocalModeRestart(false, true)).toBe(true);
+    });
+});
+
+describe('localModeToggleState', () => {
+    it('shows local mode on and locked when the build has no server settings', () => {
+        const state = localModeToggleState(false, true, true);
+        expect(state.checked).toBe(true);
+        expect(state.disabled).toBe(true);
+        expect(state.restartNeeded).toBe(false);
+        expect(state.description).toMatch(/always on/);
+    });
+
+    it('follows the preference and asks for a restart when it differs from the running mode', () => {
+        const state = localModeToggleState(true, false, false);
+        expect(state).toMatchObject({ checked: true, disabled: false, restartNeeded: true });
+        expect(state.description).toMatch(/Restart Zotero/);
+    });
+
+    it('needs no restart when the preference matches the running mode', () => {
+        const state = localModeToggleState(false, false, false);
+        expect(state).toMatchObject({ checked: false, disabled: false, restartNeeded: false });
+        expect(state.description).not.toMatch(/Restart Zotero/);
     });
 });
 

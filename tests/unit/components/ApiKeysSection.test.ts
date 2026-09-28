@@ -49,13 +49,13 @@ vi.mock('../../../react/components/preferences/utils', () => ({ handlePrefSave: 
 vi.mock('../../../react/atoms/ui', () => ({ activePreferencePageTabAtom: {}, requestPlusToolsAtom: {} }));
 vi.mock('../../../react/atoms/profile', () => ({ remainingBeaverCreditsAtom: {} }));
 vi.mock('../../../react/atoms/models', () => ({ refreshCustomModelsAtom: {} }));
-vi.mock('../../../react/atoms/localMode', () => ({ localModeEnabledAtom: {} }));
+vi.mock('../../../react/atoms/localMode', () => ({ localModeEnabledAtom: {}, localModeForcedAtom: {} }));
 vi.mock('../../../react/atoms/localAgentConfig', () => ({ localModeStatusAtom: {}, localWebSearchStatusAtom: {} }));
 vi.mock('../../../react/hooks/usePreference', () => ({
     usePreference: (read: () => any) => [read(), vi.fn()],
 }));
 vi.mock('../../../react/components/preferences/localModeSettings', () => ({
-    needsLocalModeRestart: () => false,
+    localModeToggleState: () => ({ checked: false, disabled: false, restartNeeded: false, description: '' }),
     showLocalRoundCap: () => false,
     LOCAL_ROUND_CAP_DESCRIPTION: '',
     parseLocalMaxRoundsInput: () => null,

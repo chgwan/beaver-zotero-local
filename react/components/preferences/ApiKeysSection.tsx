@@ -11,7 +11,7 @@ import { handlePrefSave } from "./utils";
 import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
 import { remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { refreshCustomModelsAtom } from "../../atoms/models";
-import { localModeEnabledAtom } from "../../atoms/localMode";
+import { localModeEnabledAtom, localModeForcedAtom } from "../../atoms/localMode";
 import { localModeStatusAtom, localWebSearchStatusAtom } from "../../atoms/localAgentConfig";
 import { usePreference } from "../../hooks/usePreference";
 import {
@@ -19,7 +19,7 @@ import {
     LOCAL_ROUND_CAP_DESCRIPTION,
     LOCAL_WEB_SEARCH_MAX_USES_DESCRIPTION,
     localWebSearchDescription,
-    needsLocalModeRestart,
+    localModeToggleState,
     parseLocalMaxRoundsInput,
     parseLocalWebSearchMaxUsesInput,
     showLocalRoundCap,
@@ -68,7 +68,9 @@ const ApiKeysSection: React.FC = () => {
         const stored = getPref('localMaxRounds');
         return stored > 0 ? String(stored) : '';
     });
-    const restartNeeded = needsLocalModeRestart(localModePref, localModeActive);
+    const localModeForced = useAtomValue(localModeForcedAtom);
+    const localModeToggle = localModeToggleState(localModePref, localModeActive, localModeForced);
+    const restartNeeded = localModeToggle.restartNeeded;
 
     const handleLocalModeToggle = useCallback((checked: boolean) => {
         setPref('localMode', checked);
@@ -204,17 +206,14 @@ const ApiKeysSection: React.FC = () => {
             <SettingsGroup className="bg-senary">
                 <SettingsRow
                     title="Run entirely on this device"
-                    description={
-                        restartNeeded
-                            ? "Connect a custom provider directly, without a Beaver account. Restart Zotero to apply this change."
-                            : "Connect a custom provider directly, without a Beaver account."
-                    }
+                    description={localModeToggle.description}
                     announceDescription={restartNeeded}
                     control={
                         <input
                             type="checkbox"
                             aria-label="Run entirely on this device"
-                            checked={localModePref}
+                            checked={localModeToggle.checked}
+                            disabled={localModeToggle.disabled}
                             onChange={(e) => handleLocalModeToggle(e.target.checked)}
                             onClick={(e) => e.stopPropagation()}
                         />

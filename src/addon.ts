@@ -79,6 +79,8 @@ class Addon {
     public libraryScopeInitialized: boolean = false;
     /** Local mode, fixed at plugin startup; see `Zotero.Beaver.localMode`. */
     public localMode: boolean = false;
+    /** Whether local mode is on because this build has no Beaver server settings. */
+    public localModeForced: boolean = false;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs

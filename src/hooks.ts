@@ -38,6 +38,7 @@ import {
 import { BeaverUIFactory } from "./ui/ui";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { compareVersions } from "./utils/compareVersions";
+import { hasBackendConfiguration, resolveLocalMode } from "./utils/backendConfiguration";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { initLocale } from "./utils/locale";
 import { clearPref, getPref, setPref } from "./utils/prefs";
@@ -302,10 +303,21 @@ async function onStartup() {
     // Fixed for this plugin load: the account and the backend access policy
     // read this flag, never the pref, so toggling the pref takes effect on the
     // next plugin load instead of cutting off a live session.
-    addon.localMode = getPref('localMode') === true;
+    // A build without Beaver server settings has no backend to reach, so it
+    // always runs in local mode.
+    const localModeState = resolveLocalMode(getPref('localMode'), hasBackendConfiguration());
+    addon.localMode = localModeState.localMode;
+    addon.localModeForced = localModeState.forced;
     addon.account ??= createInstanceAccount();
     addon.threads.start(addon.account);
-    addon.account.start();
+    // The UI below must still load if the account cannot start, so the user
+    // can reach Preferences instead of seeing no Beaver at all.
+    try {
+        addon.account.start();
+    } catch (error) {
+        ztoolkit.log("Account failed to start", error);
+        Zotero.logError(error as Error);
+    }
     addon.localEndpoints ??= new InstanceLocalEndpoints();
     addon.localEndpoints.start(addon.account, addon.preferences);
     ztoolkit.log(`Plugin version: ${version}`);

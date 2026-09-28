@@ -18,6 +18,44 @@ export function needsLocalModeRestart(prefValue: boolean, activeValue: boolean):
     return prefValue !== activeValue;
 }
 
+/** How the local-mode toggle should render. */
+export interface LocalModeToggleState {
+    checked: boolean;
+    disabled: boolean;
+    restartNeeded: boolean;
+    description: string;
+}
+
+const LOCAL_MODE_DESCRIPTION = 'Connect a custom provider directly, without a Beaver account.';
+
+/**
+ * The local-mode toggle's state. A build without Beaver server settings is
+ * always local: the toggle shows on and cannot be switched off.
+ */
+export function localModeToggleState(
+    prefValue: boolean,
+    activeValue: boolean,
+    forced: boolean,
+): LocalModeToggleState {
+    if (forced) {
+        return {
+            checked: true,
+            disabled: true,
+            restartNeeded: false,
+            description: `${LOCAL_MODE_DESCRIPTION} This build has no Beaver server settings, so local mode is always on.`,
+        };
+    }
+    const restartNeeded = needsLocalModeRestart(prefValue, activeValue);
+    return {
+        checked: prefValue,
+        disabled: false,
+        restartNeeded,
+        description: restartNeeded
+            ? `${LOCAL_MODE_DESCRIPTION} Restart Zotero to apply this change.`
+            : LOCAL_MODE_DESCRIPTION,
+    };
+}
+
 /**
  * Whether to show the round-cap field: only when local mode is on, or has
  * been switched on and is waiting for a restart. Cloud mode has no use for it.
