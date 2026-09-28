@@ -3504,9 +3504,11 @@
 /* An unbroken long string (a pasted URL or DOI) has nowhere to break at the
  * window's 200px floor: the shared `.markdown` rules ([id^="beaver-pane-"])
  * do not set this, since the library and reader panes are never squeezed this
- * narrow. Scoped to the window only, so pane rendering is unchanged. */
-#beaver-pane-window .markdown p,
-#beaver-pane-window .markdown a {
+ * narrow. `overflow-wrap` is inherited, so setting it once on the container
+ * covers every descendant (list items, table cells, code, headings, …), not
+ * just paragraphs and links. Scoped to the window only, so pane rendering is
+ * unchanged. */
+#beaver-pane-window .markdown {
     overflow-wrap: anywhere;
 }
 
