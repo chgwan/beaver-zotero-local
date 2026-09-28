@@ -113,7 +113,7 @@ export interface LlmClient {
 }
 
 /** How a provider failure should be described to the user. */
-export type LlmErrorKind = 'auth' | 'rate_limit' | 'server' | 'network' | 'bad_request' | 'cancelled';
+export type LlmErrorKind = 'auth' | 'rate_limit' | 'server' | 'network' | 'bad_request' | 'not_found' | 'cancelled';
 
 export class LlmRequestError extends Error {
     constructor(
@@ -128,6 +128,7 @@ export class LlmRequestError extends Error {
 /** Map an HTTP status to the error kind the user sees. */
 export function classifyHttpStatus(status: number): LlmErrorKind {
     if (status === 401 || status === 403) return 'auth';
+    if (status === 404) return 'not_found';
     if (status === 429) return 'rate_limit';
     if (status >= 500) return 'server';
     return 'bad_request';

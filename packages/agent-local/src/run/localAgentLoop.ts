@@ -36,6 +36,7 @@ import {
     addCitation,
     type LlmCitation,
     type LlmClient,
+    type LlmErrorKind,
     type LlmMessage,
     type LlmTurnResult,
     type LlmUsage,
@@ -98,6 +99,26 @@ interface ToolCallOutcome {
 }
 
 const describeError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * The run-error `type` reported for a classified provider failure, so the
+ * title shown to the user names the actual problem instead of a generic
+ * "local provider error". `cancelled` never reaches this: it is handled
+ * before `emitter.fail` is called.
+ */
+const LOCAL_PROVIDER_ERROR_TYPE: Record<LlmErrorKind, string> = {
+    auth: 'local_provider_auth',
+    rate_limit: 'local_provider_rate_limit',
+    network: 'local_provider_network',
+    not_found: 'local_provider_not_found',
+    bad_request: 'local_provider_bad_request',
+    server: 'local_provider_server',
+    cancelled: 'local_provider_error',
+};
+
+/** Maps a provider failure to its typed run-error, falling back for an unknown kind. */
+const localProviderErrorType = (error: LlmRequestError): string =>
+    LOCAL_PROVIDER_ERROR_TYPE[error.kind] ?? 'local_provider_error';
 
 /** Sums per-round provider usage into the run's usage. */
 class UsageTally {
@@ -413,7 +434,7 @@ export async function runLocalAgentLoop(options: LocalAgentLoopOptions): Promise
         }
 
         await emitter.fail({
-            type: error instanceof LlmRequestError ? 'local_provider_error' : 'local_agent_error',
+            type: error instanceof LlmRequestError ? localProviderErrorType(error) : 'local_agent_error',
             message: describeError(error),
             details: error instanceof LlmRequestError ? error.kind : undefined,
             // Not retried automatically. The error view still offers a manual

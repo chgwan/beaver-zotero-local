@@ -16,6 +16,17 @@ describe('getRunErrorTitle', () => {
         expect(getRunErrorTitle('regeneration_error')).toBe('An error occurred');
         expect(getRunErrorTitle(undefined)).toBe('An error occurred');
     });
+
+    it('maps local-mode error types to legible titles', () => {
+        expect(getRunErrorTitle('local_config_error')).toBe('Model not configured');
+        expect(getRunErrorTitle('local_agent_error')).toBe('Local agent error');
+        expect(getRunErrorTitle('local_provider_auth')).toBe('API key rejected');
+        expect(getRunErrorTitle('local_provider_rate_limit')).toBe('Rate limited by provider');
+        expect(getRunErrorTitle('local_provider_network')).toBe('Provider unreachable');
+        expect(getRunErrorTitle('local_provider_not_found')).toBe('Model or endpoint not found');
+        expect(getRunErrorTitle('local_provider_bad_request')).toBe('Provider rejected the request');
+        expect(getRunErrorTitle('local_provider_server')).toBe('Provider error');
+    });
 });
 
 describe('stripRunErrorTypePrefix', () => {

@@ -535,6 +535,21 @@ describe('createOpenAiResponsesClient stream', () => {
         expect(failure.message).toBe('Slow down.');
     });
 
+    it('rejects with not_found when the stream reports a not_found error code', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    ev({ type: 'response.failed', response: { status: 'failed', error: { code: 'model_not_found', message: 'Model does not exist.' } } })
+                )
+            )
+        );
+        const failure = await createOpenAiResponsesClient().streamTurn(turn(), handlers(), signal()).catch((e) => e);
+        expect(failure).toBeInstanceOf(LlmRequestError);
+        expect(failure.kind).toBe('not_found');
+        expect(failure.message).toBe('Model does not exist.');
+    });
+
     it('rejects when the stream reports an error event', async () => {
         vi.stubGlobal(
             'fetch',
@@ -573,6 +588,12 @@ describe('createOpenAiResponsesClient HTTP errors', () => {
         expect(failure.kind).toBe('auth');
         expect(failure.message).toBe('Incorrect API key provided.');
         expect(failure.message).not.toContain('sk-test');
+    });
+
+    it('classifies a 404 as a not_found error', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(404, 'Not Found', '{"error":{"message":"model not found"}}')));
+        const failure = await createOpenAiResponsesClient().streamTurn(turn(), handlers(), signal()).catch((e) => e);
+        expect(failure.kind).toBe('not_found');
     });
 
     it('classifies a 429 as a rate limit and a 500 as a server error', async () => {
