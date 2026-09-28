@@ -129,6 +129,141 @@ describe("flattenRunParts", () => {
     it("returns an empty array for a run with no model messages", () => {
         expect(flattenRunParts(run([]))).toEqual([]);
     });
+
+    it("marks a text part as repeats_itself when its content is X+X ('Ready.Ready.' shape)", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "Ready.Ready." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(true);
+    });
+
+    it("does not mark repeats_itself for non-repeating text", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "Looking that up now." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(false);
+    });
+
+    it("does not mark repeats_itself when the repeated half is shorter than 4 characters", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "abab" }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(false);
+    });
+
+    it("checks thinking parts for repeats_itself too", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "thinking", content: "Hmm okay.Hmm okay." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(true);
+    });
+
+    it("never marks repeats_itself for non-text/thinking parts, even with self-repeating content", () => {
+        const target = run([
+            { kind: "request", run_id: "run-1", instructions: "", parts: [
+                { part_kind: "tool-return", tool_name: "search", content: "abcdabcd", tool_call_id: "call-1" },
+            ] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(false);
+    });
+
+    it("marks the last text part of a tool-calling round as ends_round", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Let me check that." },
+                { part_kind: "tool-call", tool_name: "search", args: { q: 1 }, tool_call_id: "call-1" },
+            ] },
+        ]);
+        const rows = flattenRunParts(target);
+        expect(rows[0].ends_round).toBe(true);
+        expect(rows[1].ends_round).toBe(false);
+    });
+
+    it("only marks the LAST text part as ends_round when a round has multiple text parts before the tool call", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "First." },
+                { part_kind: "text", content: "Second." },
+                { part_kind: "tool-call", tool_name: "search", args: { q: 1 }, tool_call_id: "call-1" },
+            ] },
+        ]);
+        const rows = flattenRunParts(target);
+        expect(rows[0].ends_round).toBe(false);
+        expect(rows[1].ends_round).toBe(true);
+    });
+
+    it("does not mark ends_round for a response round with no tool call", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "All done, no tools needed." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.ends_round).toBe(false);
+    });
+
+    it("marks the first text part of the response immediately after a tool round as starts_round", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Let me check that." },
+                { part_kind: "tool-call", tool_name: "search", args: { q: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "request", run_id: "run-1", instructions: "", parts: [
+                { part_kind: "tool-return", tool_name: "search", content: { hits: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Found one result." },
+            ] },
+        ]);
+        const rows = flattenRunParts(target);
+        const startsRound = rows.filter(row => row.starts_round);
+        expect(startsRound).toHaveLength(1);
+        expect(startsRound[0].content_len).toBe("Found one result.".length);
+    });
+
+    it("only marks the FIRST text part as starts_round when the following round has multiple text parts", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Checking." },
+                { part_kind: "tool-call", tool_name: "search", args: { q: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "request", run_id: "run-1", instructions: "", parts: [
+                { part_kind: "tool-return", tool_name: "search", content: { hits: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "First part." },
+                { part_kind: "text", content: "Second part." },
+            ] },
+        ]);
+        const rows = flattenRunParts(target);
+        const responseTwoRows = rows.filter(row => row.message_index === 2);
+        expect(responseTwoRows[0].starts_round).toBe(true);
+        expect(responseTwoRows[1].starts_round).toBe(false);
+    });
+
+    it("does not mark starts_round for a response two rounds after a tool call", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Checking." },
+                { part_kind: "tool-call", tool_name: "search", args: { q: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "request", run_id: "run-1", instructions: "", parts: [
+                { part_kind: "tool-return", tool_name: "search", content: { hits: 1 }, tool_call_id: "call-1" },
+            ] },
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Found one result." },
+            ] },
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "One more thing." },
+            ] },
+        ]);
+        const rows = flattenRunParts(target);
+        const responseThreeRows = rows.filter(row => row.message_index === 3);
+        expect(responseThreeRows[0].starts_round).toBe(false);
+    });
 });
 
 describe("selectRunForInspection", () => {

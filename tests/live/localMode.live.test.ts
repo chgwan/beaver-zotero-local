@@ -4,8 +4,10 @@
  *
  *   R1 — a tool call must never execute with empty arguments (accumulate
  *        fragments, parse once).
- *   R2 — assistant text must never be written to more than one
- *        `(message_index, part_index)` coordinate ("Ready.Ready.").
+ *   R2 — assistant text must never be duplicated: neither self-duplicated
+ *        within one part ("Ready." + "Ready." landing in a single part's
+ *        content) nor repeated verbatim across the boundary between a
+ *        tool-calling round and the round that follows it.
  *
  * Needs a local-mode instance with a configured custom model — there is no
  * hosted backend to fall back to here. See the precondition check below for
@@ -25,6 +27,9 @@ interface RunPartRow {
     args?: unknown;
     content_len: number;
     content_hash: string;
+    repeats_itself: boolean;
+    ends_round: boolean;
+    starts_round: boolean;
 }
 
 let available = false;
@@ -86,7 +91,7 @@ describe('local mode: live R1/R2 streaming regression', () => {
 
         // R1: every tool call executed with the arguments the model sent — never `{}`.
         const toolCalls = parts.filter(part => part.part_kind === 'tool-call');
-        expect(toolCalls.length, 'the prompt must force at least one tool call').toBeGreaterThan(0);
+        expect(toolCalls.length, 'the model made no tool call; R1 not exercised').toBeGreaterThan(0);
         for (const call of toolCalls) {
             const isNonEmptyObject =
                 typeof call.args === 'object' && call.args !== null && !Array.isArray(call.args)
@@ -97,17 +102,27 @@ describe('local mode: live R1/R2 streaming regression', () => {
             ).toBe(true);
         }
 
-        // R2: no two coordinates hold the same row, and no two text parts share content.
-        const coordinates = new Set<string>();
-        for (const part of parts) {
-            const coordinate = `${part.message_index}:${part.part_index}`;
-            expect(coordinates.has(coordinate), `duplicate coordinate (${coordinate})`).toBe(false);
-            coordinates.add(coordinate);
-        }
-        const textHashes = parts.filter(part => part.part_kind === 'text').map(part => part.content_hash);
+        // R2a: no text/thinking part duplicated itself in place ("Ready.Ready.").
+        const selfRepeating = parts.filter(part => part.repeats_itself);
         expect(
-            new Set(textHashes).size,
-            'two text parts in the run share identical content (the "Ready.Ready." bug)',
-        ).toBe(textHashes.length);
+            selfRepeating.map(part => `(${part.message_index},${part.part_index})`),
+            'a text part duplicated its own content in place (the "Ready.Ready." bug)',
+        ).toEqual([]);
+
+        // R2b: the text ending a tool round must not reappear verbatim as the text
+        // starting the next round (the cross-coordinate shape of the same bug).
+        // Ignore very short texts — legitimate short phrases ("Let me check that.")
+        // can recur without being the bug.
+        const MIN_ROUND_BOUNDARY_LEN = 20;
+        const roundEnds = parts.filter(part => part.ends_round && part.content_len >= MIN_ROUND_BOUNDARY_LEN);
+        const roundStarts = parts.filter(part => part.starts_round && part.content_len >= MIN_ROUND_BOUNDARY_LEN);
+        for (const endPart of roundEnds) {
+            const nextStart = roundStarts.find(part => part.message_index > endPart.message_index);
+            if (!nextStart) continue;
+            expect(
+                nextStart.content_hash === endPart.content_hash,
+                `round-ending text at (${endPart.message_index},${endPart.part_index}) reappeared verbatim as the next round's opening text at (${nextStart.message_index},${nextStart.part_index})`,
+            ).toBe(false);
+        }
     }, 150000);
 });
