@@ -14,7 +14,7 @@ import {
     type ExclusionSnapshot,
 } from './liveExclusions';
 import { post } from './zoteroHttpClient';
-import { isZoteroAvailable } from './zoteroAvailability';
+import { isLocalModeInstance, isZoteroAvailable } from './zoteroAvailability';
 
 let snapshot: ExclusionSnapshot = null;
 
@@ -29,12 +29,16 @@ let snapshot: ExclusionSnapshot = null;
  * is an assertion that a specific instance is there, so silence is an error.
  *
  * The usual causes are the plugin still booting, being logged out, or having
- * just hot-reloaded: `/beaver/test/*` is registered by the instance and
- * gated on authentication, so editing source mid-run can deregister it.
+ * just hot-reloaded: `/beaver/test/*` is registered by the instance once it is
+ * either logged in or running in local mode, so editing source mid-run can
+ * deregister it.
  */
 async function requireNamedInstance(): Promise<void> {
     if (!ZOTERO_PORT_IS_EXPLICIT) return;
     if (await isZoteroAvailable()) {
+        // A local-mode instance has no account/profile to wait for — its scope
+        // is ready as soon as the endpoint answers.
+        if (await isLocalModeInstance()) return;
         // Instance ingress can be ready before the account's library scope hydrates.
         // Wait for that authority so suites neither skip scope checks nor mistake
         // fail-closed startup reads for fixture exclusions.
@@ -51,8 +55,9 @@ async function requireNamedInstance(): Promise<void> {
         `ZOTERO_HTTP_PORT=${port} was set but http://127.0.0.1:${port}/beaver/test/ping `
         + `did not answer, so every test would silently skip.\n`
         + `  - Is that instance running? (scripts/worktree-ready.sh <branch>)\n`
-        + `  - Is Beaver logged in? The dev endpoints are instance-owned and are\n`
-        + `    registered only once the plugin is authenticated.\n`
+        + `  - Is Beaver logged in, or running in local mode? The dev endpoints are\n`
+        + `    instance-owned and are registered only once the plugin is authenticated\n`
+        + `    or local mode is on.\n`
         + `  - Did a source edit hot-reload the plugin mid-run? Let it settle, then re-run.`,
     );
 }

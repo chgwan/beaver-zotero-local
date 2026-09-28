@@ -14,8 +14,8 @@ const prefs: Record<string, boolean> = {};
 vi.mock('../../../src/utils/prefs', () => ({ getPref: (key: string) => prefs[key] }));
 import { InstanceLocalEndpoints } from '../../../src/services/instanceLocalEndpoints';
 
-function fixture() {
-    let snapshot = { generation: 1, session: { user: { id: 'a' } }, data: {}, scopeReady: true } as any;
+function fixture(overrides: any = {}) {
+    let snapshot = { generation: 1, session: { user: { id: 'a' } }, data: {}, scopeReady: true, ...overrides } as any;
     let accountListener!: () => void, prefListener!: () => void, wake!: (message: any) => void;
     const releaseAccount = vi.fn(), releasePrefs = vi.fn();
     const account = {
@@ -73,6 +73,23 @@ describe('instance local ingress', () => {
         prefs.mcpCreateNoteToolEnabled = false; f.pref();
         expect(mocks.mcpRelease).toHaveBeenCalledTimes(1);
         expect(mocks.mcp).toHaveBeenLastCalledWith(false);
+        f.service.dispose();
+    });
+    it('enables endpoints in local mode with no account session, and disables when local mode turns off', () => {
+        Zotero.Beaver.localMode = true;
+        const f = fixture({ session: null });
+        expect(mocks.http).toHaveBeenCalledTimes(1);
+        expect(mocks.httpRelease).not.toHaveBeenCalled();
+        Zotero.Beaver.localMode = false;
+        f.change({});
+        expect(mocks.httpRelease).toHaveBeenCalledTimes(1);
+        f.service.dispose();
+    });
+    it('does not enable local-mode endpoints outside dev/staging', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        Zotero.Beaver.localMode = true;
+        const f = fixture({ session: null });
+        expect(mocks.http).not.toHaveBeenCalled();
         f.service.dispose();
     });
 });

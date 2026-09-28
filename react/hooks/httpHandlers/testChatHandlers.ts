@@ -20,8 +20,12 @@
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
  *   /beaver/test/undo-action    undo an applied action
  *
- * All are gated behind the same authenticated-only registration as the rest of
- * the dev endpoints, and only registered in development builds.
+ * All share the same registration gate as the rest of the dev endpoints — a
+ * hosted session OR local mode, in development/staging builds only (see
+ * `instanceLocalEndpoints.ts`). `chat-send` and `load-thread` work with either;
+ * `approve-action`, `confirm-credits` and `undo-action` round-trip through the
+ * hosted backend and have no local-mode equivalent, so they answer with a
+ * clear "not available in local mode" error there instead of silently no-oping.
  */
 
 import { store } from '../../store';
@@ -55,7 +59,8 @@ import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
 } from '../../atoms/messageComposition';
-import { userIdAtom, isAuthenticatedAtom } from '../../atoms/auth';
+import { userIdAtom, isAuthenticatedAtom, runUserIdAtom } from '../../atoms/auth';
+import { localModeEnabledAtom } from '../../atoms/localMode';
 import { type CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from '../../utils/zoteroReferences';
 import { resolveItemReference } from '../../../src/utils/libraryIdentity';
@@ -89,6 +94,16 @@ function pendingApprovalList(): PendingApproval[] {
 }
 function threadActions(): AgentAction[] {
     return store.get(threadAgentActionsAtom) as AgentAction[];
+}
+
+/**
+ * Write approvals, credit confirmations and undo all round-trip through the
+ * hosted backend (there is no local-mode equivalent to approve, price, or
+ * revert an action against). Return a clear, gate-shaped error rather than
+ * silently no-oping.
+ */
+function localModeUnavailable(feature: string) {
+    return { ok: false, error: `${feature} is not available in local mode (no backend account)` };
 }
 
 /** Serialize a pending approval for the wire (no live Zotero objects). */
@@ -219,8 +234,11 @@ export async function handleTestNewThreadHttpRequest(request: any) {
  * call /approve-action, then poll /current-ids (or re-approve) to continue.
  */
 export async function handleTestChatSendHttpRequest(request: any) {
-    if (!store.get(isAuthenticatedAtom)) {
-        return { ok: false, error: 'Not authenticated; chat endpoints require a logged-in plugin' };
+    if (!store.get(isAuthenticatedAtom) && !store.get(localModeEnabledAtom)) {
+        return {
+            ok: false,
+            error: 'Not authenticated; chat endpoints require a logged-in plugin or a local-mode instance',
+        };
     }
     const text = request?.text;
     if (typeof text !== 'string' || !text.trim()) {
@@ -236,7 +254,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
         // requested `threadId`.
         const threadId = request?.threadId ?? request?.thread_id;
         if (typeof threadId === 'string' && threadId && store.get(currentThreadIdAtom) !== threadId) {
-            const userId = request?.user_id ?? store.get(userIdAtom);
+            const userId = request?.user_id ?? store.get(runUserIdAtom);
             if (!userId) {
                 return { ok: false, error: 'No user_id to load requested threadId (not logged in?)' };
             }
@@ -303,7 +321,7 @@ export async function handleTestLoadThreadHttpRequest(request: any) {
     if (typeof threadId !== 'string' || !threadId) {
         return { ok: false, error: 'threadId is required' };
     }
-    const userId = request?.user_id ?? store.get(userIdAtom);
+    const userId = request?.user_id ?? store.get(runUserIdAtom);
     if (!userId) {
         return { ok: false, error: 'No user_id (not logged in?)' };
     }
@@ -348,6 +366,7 @@ export async function handleTestListActionsHttpRequest(_request: any) {
  * same verdict. When `waitForDone`, polls until the resumed run settles again.
  */
 export async function handleTestApproveActionHttpRequest(request: any) {
+    if (store.get(localModeEnabledAtom)) return localModeUnavailable('Action approval');
     const approved = request?.approved !== false; // default true
     const pending: Map<string, PendingApproval> = store.get(pendingApprovalsAtom);
 
@@ -398,6 +417,7 @@ export async function handleTestApproveActionHttpRequest(request: any) {
  * then gets a run that wrapped up without its priced steps.
  */
 export async function handleTestConfirmCreditsHttpRequest(request: any) {
+    if (store.get(localModeEnabledAtom)) return localModeUnavailable('Credit confirmation');
     const approved = request?.approved !== false; // default true
     const pending: Map<string, PendingCreditConfirmation> = store.get(
         pendingCreditConfirmationsAtom,
@@ -435,6 +455,7 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
  * the revert to actually land in the library.
  */
 export async function handleTestUndoActionHttpRequest(request: any) {
+    if (store.get(localModeEnabledAtom)) return localModeUnavailable('Undo');
     const actionId = request?.actionId;
     if (typeof actionId !== 'string' || !actionId) {
         return { ok: false, error: 'actionId is required' };

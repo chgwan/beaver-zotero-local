@@ -32,7 +32,7 @@ export class InstanceLocalEndpoints {
             }
             this.generation = snapshot.generation;
             this.scope = [...scope];
-            const httpEnabled = !!snapshot.session && (process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging');
+            const httpEnabled = (!!snapshot.session || Zotero.Beaver?.localMode === true) && (process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging');
             if (httpEnabled && !this.http) this.http = registerEndpoints();
             if (!httpEnabled) { this.http?.(); this.http = undefined; }
             const mcpKey = getPref('mcpServerEnabled') ? String(!!getPref('mcpCreateNoteToolEnabled')) : '';
