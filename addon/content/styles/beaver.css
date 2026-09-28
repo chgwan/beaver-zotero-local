@@ -2408,12 +2408,14 @@
     background-color: var(--fill-quinary);
 }
 
-[id^="beaver-pane-"] .variant-ghost:disabled {
+[id^="beaver-pane-"] .variant-ghost:disabled,
+[id^="beaver-pane-"] .variant-ghost[aria-disabled="true"] {
     cursor: not-allowed;
     color: var(--fill-tertiary);
 }
 
-[id^="beaver-pane-"] .variant-ghost:disabled:hover {
+[id^="beaver-pane-"] .variant-ghost:disabled:hover,
+[id^="beaver-pane-"] .variant-ghost[aria-disabled="true"]:hover {
     background-color: transparent;
 }
 
