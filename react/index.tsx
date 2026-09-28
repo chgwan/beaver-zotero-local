@@ -37,6 +37,7 @@ import { sessionAtom } from './atoms/auth';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
 import { currentMessageContentAtom, currentReaderAttachmentAtom, currentMessageItemsAtom, addItemToCurrentMessageItemsAtom, removeItemFromMessageAtom } from './atoms/messageComposition';
 import { allRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { flattenRunParts, selectRunForInspection } from './runtime/runPartsInspector';
 import { isTableToolName } from '@beaver/agent-core/run-state/tableResults';
 import { selectedModelAtom, validateSelectedModelAtom } from './atoms/models';
 import { isLocalMode } from './atoms/localMode';
@@ -430,6 +431,11 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
             return { entities: [...store.get(threadEntitiesAtom).values()] };
         case 'thread-state':
             return { id: runtime.id, threadId: store.get(currentThreadIdAtom), name: store.get(currentThreadNameAtom), run: store.get(activeRunAtom), draft: store.get(currentMessageContentAtom), presence: Zotero.Beaver.presence.getSnapshot() };
+        case 'run-parts': {
+            const target = selectRunForInspection(store.get(allRunsAtom), request.runId);
+            if (!target) return { error: 'run_not_found' };
+            return { runId: target.id, parts: flattenRunParts(target) };
+        }
         case 'thread-send':
             return store.set(sendWSMessageAtom, request.text ?? 'Reply with OK.').then(() => ({ ok: true }));
         case 'thread-stop':
