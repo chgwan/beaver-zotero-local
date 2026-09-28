@@ -162,6 +162,50 @@ describe("flattenRunParts", () => {
         expect(row.repeats_itself).toBe(true);
     });
 
+    it("marks repeats_itself for a single-space-separated duplication ('Ready. Ready.')", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "Ready. Ready." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(true);
+    });
+
+    it("marks repeats_itself for a blank-line-separated duplication ('Ready.\\n\\nReady.')", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "Ready.\n\nReady." }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(true);
+    });
+
+    it("marks repeats_itself for a multi-sentence duplicated half", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "Found one paper. It is X. Found one paper. It is X." },
+            ] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(true);
+    });
+
+    it("does not mark repeats_itself for 'Ha ha' (halves shorter than 4 characters)", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [{ part_kind: "text", content: "Ha ha" }] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(false);
+    });
+
+    it("does not mark repeats_itself for a normal sentence that merely contains a repeated word/phrase", () => {
+        const target = run([
+            { kind: "response", run_id: "run-1", parts: [
+                { part_kind: "text", content: "The report mentions machine learning research and machine learning applications." },
+            ] },
+        ]);
+        const [row] = flattenRunParts(target);
+        expect(row.repeats_itself).toBe(false);
+    });
+
     it("never marks repeats_itself for non-text/thinking parts, even with self-repeating content", () => {
         const target = run([
             { kind: "request", run_id: "run-1", instructions: "", parts: [

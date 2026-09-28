@@ -61,19 +61,25 @@ function partContentText(part: Record<string, any>): string {
 }
 
 /**
- * True when trimmed content is exactly two back-to-back copies of the same
- * non-trivial string (the "Ready.Ready." shape) — a duplication landing
- * inside a single part rather than at two coordinates. Halves shorter than 4
- * characters are ignored: too short to distinguish a genuine duplication bug
- * from a coincidentally repetitive short string.
+ * Matches trimmed content that is two back-to-back copies of the same
+ * non-trivial string, optionally separated by whitespace (a run of spaces or
+ * newlines) — covers both "Ready.Ready." and "Ready. Ready." /
+ * "Ready.\n\nReady.". The `{4,}` floor on the captured half (non-greedy, so
+ * the smallest valid split is tried first) keeps short incidental repeats
+ * like "Ha ha" or "abab" from matching, since a match needs the string to
+ * fully split into two identical halves of at least 4 characters each. The
+ * `[\s\S]` (rather than `.`) lets a half itself span multiple lines/sentences
+ * — this repo's `target` predates the `s`/dotAll regex flag.
+ */
+const SELF_REPEAT_PATTERN = /^([\s\S]{4,}?)\s*\1$/;
+
+/**
+ * True when trimmed content is the same non-trivial string duplicated
+ * back-to-back (the "Ready.Ready." shape) — a duplication landing inside a
+ * single part rather than at two coordinates.
  */
 function isSelfRepeating(content: string): boolean {
-    const trimmed = content.trim();
-    if (trimmed.length < 8 || trimmed.length % 2 !== 0) return false;
-    const half = trimmed.length / 2;
-    const first = trimmed.slice(0, half);
-    if (first.length < 4) return false;
-    return first === trimmed.slice(half);
+    return SELF_REPEAT_PATTERN.test(content.trim());
 }
 
 /** Index of the last part matching `kind`, or -1 if none does. */
