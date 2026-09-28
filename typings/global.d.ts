@@ -101,6 +101,11 @@ declare namespace Zotero {
          * account code.
          */
         const localMode: boolean | undefined;
+        /**
+         * True when local mode is on because the build has no Beaver server
+         * settings; the `localMode` pref cannot turn it off.
+         */
+        const localModeForced: boolean | undefined;
 
         const data: {
             env: "development" | "production";
