@@ -8,6 +8,8 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
+import { localModeEnabledAtom } from "../atoms/localMode";
+import { canTrackReaderSelection } from "./readerTabSelectionGate";
 import { isBeaverUIVisibleAtom } from '../atoms/ui';
 import {
     hasAuthorizedAccessAtom,
@@ -60,6 +62,7 @@ async function waitForReaderByTabID(tabID: string, mainWindow: Window, timeoutMs
 export function useReaderTabSelection() {
     const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+    const localMode = useAtomValue(localModeEnabledAtom);
     const hasAuthorized = useAtomValue(hasAuthorizedAccessAtom);
     const isDeviceAuthorized = useAtomValue(isDeviceAuthorizedAtom);
     const isLibraryAccessReady = useAtomValue(isLibraryAccessReadyAtom);
@@ -315,7 +318,7 @@ export function useReaderTabSelection() {
         // gate closed first runs the previous run's cleanup, which clears the
         // reader atoms and unregisters the observers.
         if (!mainWindow || !isBeaverUIVisible) return;
-        if (!isAuthenticated || !hasAuthorized || !isDeviceAuthorized || !isLibraryAccessReady) return;
+        if (!canTrackReaderSelection({ localMode, isAuthenticated, hasAuthorized, isDeviceAuthorized, isLibraryAccessReady })) return;
         logger("useReaderTabSelection: Hook mounted");
 
         let isMounted = true;
@@ -551,5 +554,5 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, localMode, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 }
