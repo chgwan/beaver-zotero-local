@@ -2,9 +2,9 @@
     "name": "beaver-zotero",
     "type": "module",
     "version": "0.25.3",
-    "description": "Academic research agent that lives in Zotero, instantly searching through all your documents and explaining complex concepts as you read.",
+    "description": "Beaver for Zotero running on your own LLM provider: no account, no Beaver servers. Fork of Beaver by JL.",
     "config": {
-        "addonName": "Beaver",
+        "addonName": "Beaver Local",
         "addonID": "beaver@jlegewie.com",
         "addonRef": "beaver",
         "addonInstance": "Beaver",
@@ -12,13 +12,13 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/chgwan/beaver-zotero.git"
+        "url": "git+https://github.com/chgwan/beaver-zotero-local.git"
     },
-    "author": "JL",
+    "author": "JL, chgwan",
     "bugs": {
-        "url": "https://github.com/chgwan/beaver-zotero/issues"
+        "url": "https://github.com/chgwan/beaver-zotero-local/issues"
     },
-    "homepage": "https://www.beaverapp.ai",
+    "homepage": "https://github.com/chgwan/beaver-zotero-local",
     "license": "AGPL-3.0-or-later",
     "scripts": {
         "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
