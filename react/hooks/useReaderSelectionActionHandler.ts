@@ -8,6 +8,7 @@ import { beginReaderActionThread } from '../utils/beginReaderActionThread';
 
 import { useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
+import { localModeEnabledAtom } from '../atoms/localMode';
 import { newThreadAtom } from '../atoms/threads';
 import { readerActionContextAtom, addItemsToCurrentMessageItemsAtom } from '../atoms/messageComposition';
 import { sendWSMessageAtom } from '../atoms/agentRunAtoms';
@@ -26,8 +27,8 @@ export function useReaderSelectionActionHandler() {
     useEventSubscription('readerSelectionAction', async (detail) => {
         const { action, text, page, readerItemID, readerLocation } = detail;
 
-        // Skip if not authenticated
-        if (!store.get(userAtom)) return;
+        // Skip if not authenticated. Local mode has no account, so it needs no user.
+        if (!store.get(userAtom) && !store.get(localModeEnabledAtom)) return;
 
         logger(`useReaderSelectionActionHandler: Received action "${action}" for item ${readerItemID}`);
 
