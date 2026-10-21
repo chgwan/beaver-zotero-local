@@ -1,153 +1,81 @@
-# ![](/addon/content/icons/beaver_nomargin.png) Beaver
+# ![](/addon/content/icons/beaver_nomargin.png) Beaver Local
 
-[![Create Beaver Account](https://img.shields.io/badge/Beaver_%F0%9F%A6%AB-Create_Account-red)](https://www.beaverapp.ai)
-[![Beaver Documentation](https://img.shields.io/badge/Documentation-blue)](https://www.beaverapp.ai/docs)
+[![zotero target version](https://img.shields.io/badge/Zotero-7--10-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](LICENSE)
 
-[![zotero target version](https://img.shields.io/badge/Zotero-7+-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
-[![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
+**Beaver Local is a fork of [Beaver](https://github.com/jlegewie/beaver-zotero) for Zotero that runs on your own LLM provider.** It needs no account and talks to no Beaver servers: your library, your API key, your model.
 
-**Beaver is an AI agent that lives inside Zotero.** It reasons over your library, the paper you're reading, and the wider literature to answer research questions with sentence‑level citations. It can annotate your PDFs, organize your library, and write notes, and much more, all without leaving Zotero.
+Beaver is an AI research agent that lives inside Zotero, built by [jlegewie](https://github.com/jlegewie) at [beaverapp.ai](https://www.beaverapp.ai). This fork adds a **local mode**: the agent loop runs inside the plugin and calls your provider directly, while the chat UI stays the same.
 
-Beaver combines two parts:
-
-1. **An advanced research agent.** An agentic system for literature retrieval and synthesis over *your* library. It composes strategies (metadata queries, semantic search, full‑text analysis, and web search) and iteratively refines its approach, reasoning over your query, the paper you're reading, and your broader library to produce grounded answers.
-
-2. **Native Zotero integration.** Beaver runs *inside* Zotero, using your curated library and reading context. When you're in a PDF, Beaver knows which page you're on, can highlight passages and add notes directly to the document, and relates what you're reading to the rest of your library — without disrupting your workflow.
-
-Beaver is available for free with your own API key or you can subscribe to use Beaver without an API key.
+> **Status: early.** All of local mode is unit-tested, but it has had little use in a real Zotero yet. Please [open an issue](https://github.com/chgwan/beaver-zotero-local/issues) with the Error Console output (Tools → Developer → Error Console) if something breaks.
 
 ---
 
-## Key Features
+## What local mode does
 
-### Chat with your entire library
+- **No login.** Bring your own API key; there is no Beaver account or subscription.
+- **No Beaver servers.** Requests go only to your model endpoint and, if enabled, the scholarly search APIs. Backend access is blocked in every part of the plugin.
+- **Any compatible provider.** OpenAI-compatible endpoints (OpenAI, OpenRouter, DeepSeek, local servers such as Ollama, LM Studio or vLLM) and the Anthropic Messages API.
+- **Chat with your library.** The agent searches metadata and full text, lists items, collections, tags and libraries, reads notes and annotations, and reads PDF and EPUB attachments.
+- **Reader integration.** Ask about the open paper, or run an action on a text selection or an annotation.
+- **Scholarly search.** OpenAlex and Semantic Scholar, free and keyless by default, with optional keys for higher limits.
+- **Web search.** Uses the provider's own hosted search tool (Anthropic, OpenAI, OpenRouter); toggle it with the globe icon in the composer.
+- **Library exclusions.** Libraries you exclude in Preferences are never sent to the model.
 
-Ask questions about your research and get answers drawn from your whole library. Beaver searches across metadata, topics, and the full content of your PDFs. It combines precise keyword matching with semantic search that understands meaning to give grounded answers. [Learn more](https://www.beaverapp.ai/docs/searching)
+### Not available in local mode
 
-### Sentence‑level citations
+These upstream features depend on the Beaver backend:
 
-<img src="https://www.beaverapp.ai/_next/image?url=%2Fassets%2Fcitation-sentence.png&w=640&q=75" align="right" width="320" alt="AI-powered PDF annotations" />
-
-Beaver cites its sources **sentence by sentence**, not just by page, so you can trace any claim back to exactly where it came from. Hover to preview the source text, or click to open the PDF with the supporting sentences highlighted.
-
-The citation system is tuned with dedicated evaluations focused on open‑ended research questions, optimizing for the right paper, the exact passage, and evidence that genuinely supports the claim.
-
-### Reading assistant
-
-<!-- <img src="https://www.beaverapp.ai/_next/image?url=%2Fassets%2Freading-assistant.png&w=640&q=75" align="right" width="320" alt="Reading assistant features" /> -->
-
-Beaver is integrated directly inside your PDF reader, so you can work without ever leaving the page:
-
-- **Ask about this paper.** Answers grounded in the open PDF, with sentence‑level citations.
-- **Understand text, figures & tables.** Select a passage, or attach a figure with an area annotation, for an instant explanation.
-- **Annotate the PDF.** Ask Beaver to highlight key findings or anything relevant to your work.
-- **Connect it to your library.** Ask whether the rest of your library confirms, contradicts, or extends this paper's claims.
-
-[Learn more](https://www.beaverapp.ai/docs/zotero-reader)
-
-### AI‑powered PDF annotations
-
-<img src="https://www.beaverapp.ai/assets/highlight-annotations.png" align="right" width="320" alt="AI-powered PDF annotations" />
-
-Just ask Beaver to *"highlight the key findings"* or *"mark everything relevant to my project,"* and it adds highlights and notes to the PDF for you. Annotations support color and comments, and you can have Beaver organize them by color or tag:
-
-> *"Highlight the methods in blue, the results in yellow, and the conclusions in green."*
-
-Because Beaver is a Zotero plugin, everything it creates is a **real Zotero annotation**. It lives in your reader, syncs with your library, and stays fully editable. All changes require your approval by default. [Learn more](https://www.beaverapp.ai/docs/annotations)
-
-### Annotation search
-
-Beaver can search annotations across your **entire library**, not just the document you're reading:
-
-> *"Summarize all blue annotations from the last week."*
-> *"List all annotations in my Dissertation collection tagged 'social-capital'."*
-
-Search by highlighted text, comment, tag, color, annotation type (highlight, underline, note), author, attachment, collection, and creation/modification date.
-
-### Read, write & edit notes
-
-Beaver can create Zotero notes, read your existing ones, and edit them with full support for citations and math. Every edit requires your approval and can be undone. [Learn more](https://www.beaverapp.ai/docs/notes)
-
-### Organize & edit your library
-
-Beaver can help you manage collections, add tags, fix metadata, and keep your library organized. All changes require your approval. [Learn more](https://www.beaverapp.ai/docs/library-management)
-
-### Discover new research
-
-Search over **240 million scholarly works** outside your Zotero library. Understand citation patterns and find papers to expand your collection. Beaver always prioritizes your library and only reaches for external sources when your library has limited information or when you ask. [Learn more](https://www.beaverapp.ai/docs/web-search)
-
-### MCP server
-
-Beaver ships an [MCP server](https://www.beaverapp.ai/docs/mcp-server) that exposes your library to MCP‑compatible clients (e.g. Claude Desktop). It includes read tools for searching and reading your library and notes, plus `create_note` an additive write tool that creates new notes without modifying existing data.
-
-### Your library, your control
-
-- **Your library as a knowledge base:** Beaver prioritizes your curated Zotero library and sources you trust, not generic web results.
-- **Privacy:** Your data stays yours. We don't train models on your data without explicit opt‑in, and we're building local storage options.
-- **Free version:** A fully‑featured free tier supports local file processing with metadata and semantic search over titles and abstracts. [Learn more](https://www.beaverapp.ai/pricing)
+- sentence-level citations and semantic (embedding) search
+- write actions: annotating PDFs, editing notes, organizing the library
+- threads that persist across restarts or sync across windows
+- the MCP server and cloud OCR
 
 ---
 
-## Accuracy and Reliability through Evaluations
+## Install
 
-We continuously evaluate Beaver's accuracy and performance on tasks that matter most for researchers including factual correctness (whether claims are accurate based on research findings), citation support (whether claims are supported by the correct citation down to the exact passage in the source document), retrieval (finding the right information) and more. As Beaver evolves, we will share more benchmarks and evaluation results.
+1. Download `beaver-local.xpi` from the [latest release](https://github.com/chgwan/beaver-zotero-local/releases).
+2. In Zotero, open **Tools → Plugins**, click the gear icon, choose **Install Plugin From File…** and select the `.xpi`.
+3. Restart Zotero.
 
-As an example, here is one early test based on a modified version of the LitQA2 benchmark with 197 multiple‑choice questions from Future House's [LAB‑Bench](https://github.com/Future-House/LAB-Bench). This benchmark emphasizes literature retrieval: answers are located in the main text of a single paper rather than abstracts or general knowledge.
+Beaver Local uses the same add-on ID as Beaver, so it **replaces** an installed official Beaver; the two cannot run side by side. Updates come only from this repository.
 
-![Figure: Performance comparison for Beaver Preview](/docs/litqa2-accuracy-preview.png)
+## Set up a provider
 
-On this task, Beaver's retrieval from a pre‑defined document set performed strongly. For context, we also compared against large models with general internet search tools. These are _not directly comparable_, but the contrast gives a sense of how retrieval on a pre‑defined library (such as your Zotero library) performs compared to general internet search.
+1. Open Beaver with the icon at the top right of the main window, or press **Ctrl+J** (**⌘J** on macOS).
+2. Open Beaver **Preferences → API Keys → Local Mode**.
+3. Add a provider:
+   - **Endpoint:** for example `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, `https://api.anthropic.com` or `http://localhost:11434/v1`
+   - **API key:** may be left empty for a local server on `localhost`
+   - **Format:** `openai` or `anthropic`
+4. Use **Test Endpoint** to check the connection, then restart Zotero.
+5. Pick the model in the composer and start chatting.
 
-This is only one dimension of evaluation (and not the hardest). We will share more benchmarks and evaluation results over time.
+Optional settings:
 
-## Getting started
+- **Preferences → Search:** turn scholarly search on or off, add OpenAlex and Semantic Scholar API keys, allow web search and set the maximum searches per request.
+- **Preferences → Advanced → Allow Library Access:** exclude libraries from the agent.
 
-1. Create an account and download Beaver [here](https://www.beaverapp.ai/join).
-2. In Zotero, go to **Tools → Add‑ons → Install Add‑on From File**.
-3. Select the downloaded `.xpi` file.
-4. Open Beaver using the magic wand icon in the top‑right corner, or press **Cmd (macOS) / Ctrl (Windows) + J**.
-
-More details are in the [documentation](https://www.beaverapp.ai/docs/getting-started).
-
-## Connection problems (corporate networks, VPNs, IT administrators)
-
-If you see **"Connection Failed — Could not connect to the server"**, the most common cause is a corporate proxy, firewall, or TLS-inspection appliance blocking Beaver's WebSocket traffic. In short, Beaver needs outbound HTTPS **and** WebSocket Secure (`wss://`) on TCP 443 to the Beaver API host, plus HTTPS to `*.supabase.co` for sign-in.
-
-The full guide — including the quick self-diagnosis steps, what each error code means, and the exact allowlist/TLS-bypass details for your IT team — is here:
-
-**[Connection troubleshooting](https://www.beaverapp.ai/docs/connection-troubleshooting)**
+---
 
 ## Building from source
 
+Requires Node.js 24 (Node 25 is not supported by `zotero-plugin-scaffold`).
+
 ```bash
-git clone https://github.com/jlegewie/beaver-zotero.git
-cd beaver-zotero
-npm install
+git clone https://github.com/chgwan/beaver-zotero-local.git
+cd beaver-zotero-local
+npm ci
 npm run build
 ```
 
-The build requires environment variables for the Supabase URL, anon key, and API endpoints. Create a `.env.production` file or set them in your environment:
+The XPI is written to `.scaffold/build/beaver-local.xpi`. No server settings are needed: a build without Beaver backend configuration always starts in local mode.
 
-```
-SUPABASE_URL=<supabase-url>
-SUPABASE_ANON_KEY=<supabase-anon-key>
-API_BASE_URL=<api-url>
-WEBAPP_BASE_URL=<webapp-url>
-```
+Run the unit tests with `npm test`.
 
-The built XPI will be in `.scaffold/build/`.
+## Credits and license
 
-**Source maps:** To generate source maps for the production React bundle, change `devtool` in `webpack.config.js` from `false` to `'source-map'` and rebuild:
+Beaver is created by [jlegewie](https://github.com/jlegewie); see the [upstream repository](https://github.com/jlegewie/beaver-zotero) and [beaverapp.ai](https://www.beaverapp.ai) for the full, hosted version. Local mode is developed by [chgwan](https://github.com/chgwan).
 
-```js
-// webpack.config.js, line 37
-devtool: mode === 'development' ? 'inline-source-map' : 'source-map',
-```
-
-This produces a `reactBundle.js.map` that maps back to the original TypeScript source. The esbuild bundle (`content/scripts/beaver.js`) is not minified and is readable as‑is.
-
-## System Requirements
-
-- Zotero 7.0 or later
-- Internet connection for cloud features
-- Modern web browser for account management
+Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE), like upstream Beaver.
