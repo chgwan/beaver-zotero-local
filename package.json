@@ -1,7 +1,7 @@
 {
     "name": "beaver-zotero",
     "type": "module",
-    "version": "0.25.3",
+    "version": "0.25.4",
     "description": "Beaver for Zotero running on your own LLM provider: no account, no Beaver servers. Fork of Beaver by JL.",
     "config": {
         "addonName": "Beaver Local",
