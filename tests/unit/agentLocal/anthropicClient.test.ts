@@ -537,6 +537,22 @@ describe('createAnthropicClient', () => {
         expect(result.usage).toEqual({ inputTokens: 42, outputTokens: 7 });
     });
 
+    it('counts cached prompt tokens as input and reports the cache split', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                sseResponse(
+                    'event: message_start\ndata: {"message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":4137,"cache_read_input_tokens":500,"output_tokens":1}}}\n\n',
+                    'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n',
+                    'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}\n\n',
+                    STOP
+                )
+            )
+        );
+        const result = await createAnthropicClient().streamTurn(turn(), handlers(), signal());
+        expect(result.usage).toEqual({ inputTokens: 4639, outputTokens: 4, cacheWriteTokens: 4137, cacheReadTokens: 500 });
+    });
+
     it('reports null usage when the provider never sends it', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(STOP)));
         const result = await createAnthropicClient().streamTurn(turn(), handlers(), signal());

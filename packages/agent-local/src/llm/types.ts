@@ -53,8 +53,13 @@ export type LlmFinishReason = 'stop' | 'tool_calls' | 'length' | 'pause' | 'unkn
 
 /** Token accounting for one turn, in the provider-neutral shape the loop sums. */
 export interface LlmUsage {
+    /** The whole prompt, including any part written to or read from the provider's cache. */
     inputTokens: number;
     outputTokens: number;
+    /** Prompt tokens written to the cache; set only when the provider reports caching. */
+    cacheWriteTokens?: number;
+    /** Prompt tokens served from the cache; set only when the provider reports caching. */
+    cacheReadTokens?: number;
 }
 
 export interface LlmTurnResult {
