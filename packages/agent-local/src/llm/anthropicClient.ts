@@ -369,7 +369,12 @@ export function createAnthropicClient(): LlmClient {
             // Input and output tokens arrive on separate frame types
             // (`message_start` and `message_delta`), so each is tracked
             // independently and combined only once the stream ends.
+            // `input_tokens` excludes the cached part of the prompt, which
+            // arrives in the two cache fields; a provider that caches
+            // automatically reports only a few uncached tokens there.
             let inputTokens: number | null = null;
+            let cacheWriteTokens: number | null = null;
+            let cacheReadTokens: number | null = null;
             let outputTokens: number | null = null;
 
             for await (const event of readSseEvents(response.body, signal)) {
@@ -391,8 +396,14 @@ export function createAnthropicClient(): LlmClient {
                 }
 
                 if (type === 'message_start') {
-                    const startInputTokens = frame.message?.usage?.input_tokens;
-                    if (typeof startInputTokens === 'number') inputTokens = startInputTokens;
+                    const startUsage = frame.message?.usage ?? {};
+                    if (typeof startUsage.input_tokens === 'number') inputTokens = startUsage.input_tokens;
+                    if (typeof startUsage.cache_creation_input_tokens === 'number') {
+                        cacheWriteTokens = startUsage.cache_creation_input_tokens;
+                    }
+                    if (typeof startUsage.cache_read_input_tokens === 'number') {
+                        cacheReadTokens = startUsage.cache_read_input_tokens;
+                    }
                     continue;
                 }
 
@@ -478,10 +489,17 @@ export function createAnthropicClient(): LlmClient {
                 finishReason = 'tool_calls';
             }
 
-            // Null unless the provider sent at least one of the two counts.
+            // Null unless the provider sent at least one of the counts.
+            const reportsCache = cacheWriteTokens !== null || cacheReadTokens !== null;
             const usage: LlmUsage | null =
-                inputTokens !== null || outputTokens !== null
-                    ? { inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0 }
+                inputTokens !== null || outputTokens !== null || reportsCache
+                    ? {
+                          inputTokens: (inputTokens ?? 0) + (cacheWriteTokens ?? 0) + (cacheReadTokens ?? 0),
+                          outputTokens: outputTokens ?? 0,
+                          ...(reportsCache
+                              ? { cacheWriteTokens: cacheWriteTokens ?? 0, cacheReadTokens: cacheReadTokens ?? 0 }
+                              : {}),
+                      }
                     : null;
 
             const providerBlocks = recorder.close();

@@ -131,7 +131,12 @@ class UsageTally {
         this.requests++;
         if (!usage) return;
         this.reported = true;
-        this.perRequest.push({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens });
+        this.perRequest.push({
+            input_tokens: usage.inputTokens,
+            output_tokens: usage.outputTokens,
+            ...(usage.cacheWriteTokens !== undefined ? { cache_write_tokens: usage.cacheWriteTokens } : {}),
+            ...(usage.cacheReadTokens !== undefined ? { cache_read_tokens: usage.cacheReadTokens } : {}),
+        });
     }
 
     addSuccessfulToolCall(): void {
@@ -143,17 +148,21 @@ class UsageTally {
         if (!this.reported) return null;
         let input = 0;
         let output = 0;
+        let cacheWrite = 0;
+        let cacheRead = 0;
         for (const entry of this.perRequest) {
             input += entry.input_tokens;
             output += entry.output_tokens ?? 0;
+            cacheWrite += entry.cache_write_tokens ?? 0;
+            cacheRead += entry.cache_read_tokens ?? 0;
         }
         return {
             requests: this.requests,
             tool_calls: this.toolCalls,
             input_tokens: input,
             output_tokens: output,
-            cache_write_tokens: 0,
-            cache_read_tokens: 0,
+            cache_write_tokens: cacheWrite,
+            cache_read_tokens: cacheRead,
             input_audio_tokens: 0,
             cache_audio_read_tokens: 0,
             model_requests: [...this.perRequest],

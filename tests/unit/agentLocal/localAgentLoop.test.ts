@@ -508,6 +508,23 @@ describe('runLocalAgentLoop', () => {
         ]);
     });
 
+    it('sums cache reads and writes into the run usage and each request entry', async () => {
+        const client = scriptedClient([
+            {
+                toolCalls: [call('c1', { query: 'x' })],
+                usage: { inputTokens: 4139, outputTokens: 10, cacheWriteTokens: 4137, cacheReadTokens: 0 },
+            },
+            { textChunks: ['Ready.'], usage: { inputTokens: 4300, outputTokens: 20, cacheWriteTokens: 160, cacheReadTokens: 4137 } },
+        ]);
+        await run(client, callbacks);
+        const usage = callbacks.onRunComplete.mock.calls[0][0].usage;
+        expect(usage).toMatchObject({ input_tokens: 8439, cache_write_tokens: 4297, cache_read_tokens: 4137 });
+        expect(usage.model_requests).toEqual([
+            { input_tokens: 4139, output_tokens: 10, cache_write_tokens: 4137, cache_read_tokens: 0 },
+            { input_tokens: 4300, output_tokens: 20, cache_write_tokens: 160, cache_read_tokens: 4137 },
+        ]);
+    });
+
     it('counts only successful tool calls in usage', async () => {
         const catalog = stubCatalog({
             execute: vi.fn(async () => ({ ok: false, error: 'boom', retryable: true })),
