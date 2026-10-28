@@ -64,7 +64,7 @@
         "jotai": "^2.12.1",
         "lexical": "^0.43.0",
         "p-queue": "^9.0.1",
-        "pako": "^1.0.11",
+        "pako": "^3.0.2",
         "prop-types": "^15.8.1",
         "prosemirror-model": "^1.25.4",
         "prosemirror-state": "^1.4.4",
