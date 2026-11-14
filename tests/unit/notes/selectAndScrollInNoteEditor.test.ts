@@ -20,6 +20,7 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 vi.mock('../../../react/atoms/auth', () => ({
     userIdAtom: Symbol('userIdAtom'),
+    runUserIdAtom: Symbol('runUserIdAtom'),
 }));
 
 // sourceUtils surfaces unavailable-reference popups; the popup chain pulls in

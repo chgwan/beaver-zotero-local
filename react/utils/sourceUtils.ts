@@ -21,7 +21,7 @@ import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
-import { userIdAtom } from '../atoms/auth';
+import { runUserIdAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { computeDiff, stripHtmlTags } from '../components/agentRuns/EditNotePreview';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
@@ -94,8 +94,8 @@ export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Z
 */
 export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: boolean, error?: string}> {
 
-    // User ID
-    const userID = store.get(userIdAtom);
+    // User ID. Local mode has no account, so the run user id stands in for it.
+    const userID = store.get(runUserIdAtom);
     if (!userID) return {valid: false, error: "User ID not found. Make sure you are logged in."};
 
     // Item library

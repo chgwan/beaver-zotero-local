@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('../../../react/store', () => ({ store: { get: vi.fn() } }));
 vi.mock('../../../react/atoms/profile', () => ({ searchableLibraryIdsAtom: {} }));
-vi.mock('../../../react/atoms/auth', () => ({ userIdAtom: {} }));
+vi.mock('../../../react/atoms/auth', () => ({ userIdAtom: {}, runUserIdAtom: {} }));
 vi.mock('../../../react/host/zotero/sourceActions', () => ({ notifyReferenceUnavailable: vi.fn() }));
 vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
     stripHtmlTags: vi.fn(), computeDiff: vi.fn(),
